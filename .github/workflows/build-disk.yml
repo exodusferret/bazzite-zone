@@ -15,6 +15,11 @@ on:
         options:
           - amd64
           - arm64
+  # NEU: Startet den ISO-Build automatisch, sobald das Container-Image fertig gebaut ist!
+  workflow_run:
+    workflows: ["Build container image"] # Muss exakt dem 'name:' in der build.yml entsprechen
+    types:
+      - completed
   pull_request:
     branches:
       - main
