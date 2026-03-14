@@ -3,7 +3,7 @@ FROM scratch AS ctx
 COPY build_files /
 
 # Base Image
-FROM ghcr.io/ublue-os/bazzite-deck:stable as zotaczone-zzite
+FROM ghcr.io/ublue-os/bazzite-deck:stable as zotaczone-bazzite
 
 ## Other possible base images include:
 # FROM ghcr.io/ublue-os/bazzite:latest
