@@ -4,8 +4,8 @@ This project builds a **custom** Bazzite image for the Zotac Zone gaming handhel
 
 ## Why this image?
 
-OpenZotacZone drivers installed via `build.sh` or manual scripts are only temporary and need to be rebuilt and reinstalled after kernel updates.[page:2]  
-A custom Bazzite-based image makes these drivers persistent – they survive system updates, reboots, and rebases within the Universal Blue / bootc workflow.[page:2]
+OpenZotacZone drivers installed via `build.sh` or manual scripts are only temporary and need to be rebuilt and reinstalled after kernel updates.
+A custom Bazzite-based image makes these drivers persistent – they survive system updates, reboots, and rebases within the Universal Blue / bootc workflow.
 
 ## Based on
 
