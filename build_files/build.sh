@@ -859,15 +859,29 @@ PLUGINS=(
 )
 
 for repo in "${PLUGINS[@]}"; do
-    DOWNLOAD_URL=$(curl -sf "https://api.github.com/repos/${repo}/releases/latest" \
-        | grep 'browser_download_url.*\.tar\.gz' | cut -d '"' -f 4 | head -n 1)
+    echo "-> Hole Decky Plugin: $repo"
 
-    if [ -z "$DOWNLOAD_URL" ]; then
-        echo "  SKIP: kein .tar.gz Release für ${repo}"
+    # API-Resultat in Variable, Fehler dabei explizit abfangen
+    api_json=$(curl -sf "https://api.github.com/repos/$repo/releases/latest" || true)
+    if [ -z "$api_json" ]; then
+        echo "WARN: API-Request für $repo fehlgeschlagen – überspringe"
         continue
     fi
 
-    wget -q --show-progress "$DOWNLOAD_URL" || echo "  SKIP: Download fehlgeschlagen für ${repo}"
+    # grep darf bei 0 Treffern nicht den Build killen
+    DOWNLOAD_URL=$(printf '%s\n' "$api_json" \
+        | grep 'browser_download_url.*\.tar\.gz' || true)
+    DOWNLOAD_URL=$(printf '%s\n' "$DOWNLOAD_URL" | cut -d '"' -f 4 | head -n 1)
+
+    if [ -z "$DOWNLOAD_URL" ]; then
+        echo "WARN: Kein .tar.gz Release für $repo gefunden – überspringe"
+        continue
+    fi
+
+    if ! wget -q --show-progress "$DOWNLOAD_URL"; then
+        echo "WARN: Download für $repo fehlgeschlagen – überspringe"
+        continue
+    fi
 done
 
 for f in *.tar.gz; do
