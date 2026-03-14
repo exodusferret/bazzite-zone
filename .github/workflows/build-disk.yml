@@ -50,7 +50,10 @@ jobs:
       packages: read
       id-token: write
 
-    steps:
+    steps: 
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      
       - name: Prepare environment
         run: |
           USER_UID=$(id -u)
@@ -79,9 +82,6 @@ jobs:
         uses: ublue-os/remove-unwanted-software@cc0becac701cf642c8f0a6613bbdaf5dc36b259e # v9
         with:
           remove-codeql: true
-
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Build disk images
         id: build
