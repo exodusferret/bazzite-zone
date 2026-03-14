@@ -1,3 +1,4 @@
+```bash
 #!/bin/bash
 set -ouex pipefail
 
@@ -43,76 +44,8 @@ echo "-> Baue OpenZONE HID & Platform Treiber..."
 
 BUILD_DIR="/tmp/zotac_zone_build"
 DRIVER_INSTALL_DIR="/usr/local/lib/zotac-zone"
-mkdir -p "$BUILD_DIR" "$DRIVER_INSTALL_DIR"
-cd "$BUILD_DIR"
-
-for f in \
-    "zotac-zone-hid-core.c" \
-    "zotac-zone-hid-rgb.c" \
-    "zotac-zone-hid-input.c" \
-    "zotac-zone-hid-config.c" \
-    "zotac-zone.h"
-do
-    wget -q "${OPENZONE_RAW}/driver/hid/${f}"
-done
-
-for f in \
-    "zotac-zone-platform.c" \
-    "firmware_attributes_class.h" \
-    "firmware_attributes_class.c"
-do
-    wget -q "${OPENZONE_RAW}/driver/platform/${f}"
-done
-
-cat > Makefile << 'EOF'
-obj-m += zotac-zone-hid.o
-zotac-zone-hid-y := zotac-zone-hid-core.o zotac-zone-hid-rgb.o zotac-zone-hid-input.o zotac-zone-hid-config.o
-obj-m += firmware_attributes_class.o
-obj-m += zotac-zone-platform.o
-all:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
-clean:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
-EOF
-
-make -C /usr/lib/modules/${KERNEL_VERSION}/build M=$(pwd) modules
-cp *.ko "$DRIVER_INSTALL_DIR/"
-
-cat > /usr/lib/systemd/system/zotac-zone-drivers.service << EOF
-[Unit]
-Description=Zotac Zone HID & Platform Drivers (OpenZONE)
-After=network.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/sbin/modprobe led-class-multicolor
-ExecStart=/usr/sbin/modprobe platform_profile
-ExecStart=/usr/sbin/insmod ${DRIVER_INSTALL_DIR}/firmware_attributes_class.ko
-ExecStart=/usr/sbin/insmod ${DRIVER_INSTALL_DIR}/zotac-zone-platform.ko
-ExecStart=/usr/sbin/insmod ${DRIVER_INSTALL_DIR}/zotac-zone-hid.ko
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl enable zotac-zone-drivers.service
-
-cat > /usr/lib/udev/rules.d/99-zotac-zone.rules << 'EOF'
-KERNEL=="hidraw*", ATTRS{idVendor}=="1ee9", ATTRS{idProduct}=="1590", MODE="0666"
-EOF
-
-echo "uinput" > /usr/lib/modules-load.d/zotac-uinput.conf
-# ==============================================================================
-# 2. OPENZONE HID + PLATFORM TREIBER
-#    Quelle: github.com/OpenZotacZone/ZotacZone-Drivers
-#    Liefert: Input, Back-Buttons, RGB, Radial-Dials, Platform-Sensor
-# ==============================================================================
-echo "-> Baue OpenZONE HID & Platform Treiber..."
-
-BUILD_DIR="/tmp/zotac_zone_build"
-DRIVER_INSTALL_DIR="/usr/local/lib/zotac-zone"
-mkdir -p "$BUILD_DIR" "$DRIVER_INSTALL_DIR"
+mkdir -p "$BUILD_DIR"
+install -d -m 755 "$DRIVER_INSTALL_DIR"
 cd "$BUILD_DIR"
 
 for f in \
@@ -300,10 +233,10 @@ echo "-> Baue EC Fan-Treiber & installiere CoolerControl..."
 
 EC_BUILD_DIR="/tmp/zotac_ec_fan_build"
 EC_INSTALL_DIR="/usr/local/lib/zotac-zone-fan"
-mkdir -p "$EC_BUILD_DIR" "$EC_INSTALL_DIR"
+mkdir -p "$EC_BUILD_DIR"
+install -d -m 755 "$EC_INSTALL_DIR"
 cd "$EC_BUILD_DIR"
 
-# EC-Treiber Quellcode (hwmon-only Version von ElektroCoder/Pfahli)
 wget -q -O zotac-zone-platform.c \
     "${ELEKTROCODER_RAW}/zotac-zone-platform.c"
 
@@ -318,7 +251,6 @@ EOF
 make -C /usr/lib/modules/${KERNEL_VERSION}/build M=$(pwd) modules
 cp zotac-zone-platform.ko "$EC_INSTALL_DIR/"
 
-# Fan-Enable Skript
 cat > /usr/local/bin/zotac-fan-enable.sh << EOF
 #!/usr/bin/env bash
 set -e
@@ -335,7 +267,6 @@ echo "[+] Fan-Setup abgeschlossen."
 EOF
 chmod +x /usr/local/bin/zotac-fan-enable.sh
 
-# CoolerControl Daemon (AppImage)
 CC_DIR="/var/opt/coolercontrol"
 mkdir -p "$CC_DIR"
 curl -fL -o "${CC_DIR}/CoolerControlD-x86_64.AppImage" \
@@ -392,19 +323,13 @@ cd "$HDR_BUILD_DIR"
 
 mkdir -p /usr/lib/firmware/edid
 
-# Installer-Skript herunterladen
 wget -q -O install_zotac_hdr.sh "${HDR_RAW}/install_zotac_hdr.sh"
 chmod +x install_zotac_hdr.sh
 
-# Non-interactive ausführen (Reboot-Prompts ignorieren)
-# Das Skript platziert die EDID-Datei und setzt rpm-ostree kargs
 bash install_zotac_hdr.sh || true
 
-# Sicherheitscheck
 if ls /usr/lib/firmware/edid/*.bin 2>/dev/null | head -n 1 > /dev/null; then
     echo "[+] EDID-Datei erfolgreich platziert."
-    # drm.edid_firmware Parameter für Bootloader sichern
-    # (wird von rpm-ostree kargs oder grubenv gesetzt)
     EDID_FILE=$(ls /usr/lib/firmware/edid/*.bin | head -n 1 | xargs basename)
     echo "    -> Kernel-Parameter: drm.edid_firmware=eDP-1:edid/${EDID_FILE}"
 else
@@ -502,7 +427,6 @@ for f in *.tar.gz; do
     [ -f "$f" ] && tar -xzf "$f" && rm "$f"
 done
 
-# Login-Sync: Plugins beim ersten User-Login in ~/homebrew/plugins kopieren
 mkdir -p /usr/etc/profile.d/
 cat > /usr/etc/profile.d/decky-zotac-sync.sh << 'EOF'
 #!/bin/bash
@@ -531,3 +455,4 @@ echo "  [OK] CoolerControl                   – Fan-Kurven (localhost:11987)"
 echo "  [OK] HDR & 144Hz EDID-Fix            – kein grüner Tint, OLED 144Hz"
 echo "  [OK] Decky Loader                    – Plugin-System"
 echo "  [OK] Decky Plugins (${#PLUGINS[@]}x) – staging -> ~/homebrew/plugins"
+```
