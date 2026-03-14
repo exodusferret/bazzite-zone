@@ -1,4 +1,3 @@
-```bash
 #!/bin/bash
 set -ouex pipefail
 
@@ -43,9 +42,8 @@ pip install evdev --break-system-packages
 echo "-> Baue OpenZONE HID & Platform Treiber..."
 
 BUILD_DIR="/tmp/zotac_zone_build"
-DRIVER_INSTALL_DIR="/usr/local/lib/zotac-zone"
-mkdir -p "$BUILD_DIR"
-install -d -m 755 "$DRIVER_INSTALL_DIR"
+DRIVER_INSTALL_DIR="/usr/lib/zotac-zone"
+mkdir -p "$BUILD_DIR" "$DRIVER_INSTALL_DIR"
 cd "$BUILD_DIR"
 
 for f in \
@@ -113,7 +111,7 @@ echo "uinput" > /usr/lib/modules-load.d/zotac-uinput.conf
 # ==============================================================================
 echo "-> Installiere Dial-Daemon..."
 
-DIAL_SCRIPT="/usr/local/bin/zotac_dial_daemon.py"
+DIAL_SCRIPT="/usr/bin/zotac_dial_daemon.py"
 
 cat > "$DIAL_SCRIPT" << 'PYEOF'
 #!/usr/bin/env python3
@@ -225,16 +223,14 @@ systemctl enable zotac-dials.service
 # ==============================================================================
 # 4. EC FAN TREIBER + COOLERCONTROL
 #    Quelle: ElektroCoder Gist (hwmon-only zotac-zone-platform.c)
-#            github.com/OpenZotacZone/Zotac-Zone-Fan-Control (Installer-Skript)
 #    Liefert: hwmon "zotac_platform" -> Fan-PWM, RPM, Temp-Sensor
 #             CoolerControl AppImage als Daemon (Web-UI: localhost:11987)
 # ==============================================================================
 echo "-> Baue EC Fan-Treiber & installiere CoolerControl..."
 
 EC_BUILD_DIR="/tmp/zotac_ec_fan_build"
-EC_INSTALL_DIR="/usr/local/lib/zotac-zone-fan"
-mkdir -p "$EC_BUILD_DIR"
-install -d -m 755 "$EC_INSTALL_DIR"
+EC_INSTALL_DIR="/usr/lib/zotac-zone-fan"
+mkdir -p "$EC_BUILD_DIR" "$EC_INSTALL_DIR"
 cd "$EC_BUILD_DIR"
 
 wget -q -O zotac-zone-platform.c \
@@ -251,7 +247,7 @@ EOF
 make -C /usr/lib/modules/${KERNEL_VERSION}/build M=$(pwd) modules
 cp zotac-zone-platform.ko "$EC_INSTALL_DIR/"
 
-cat > /usr/local/bin/zotac-fan-enable.sh << EOF
+cat > /usr/bin/zotac-fan-enable.sh << EOF
 #!/usr/bin/env bash
 set -e
 echo "[*] Lade Zotac Zone EC Fan-Treiber..."
@@ -265,7 +261,7 @@ echo "[*] Starte CoolerControl neu..."
 /usr/bin/systemctl restart coolercontrold || true
 echo "[+] Fan-Setup abgeschlossen."
 EOF
-chmod +x /usr/local/bin/zotac-fan-enable.sh
+chmod +x /usr/bin/zotac-fan-enable.sh
 
 CC_DIR="/var/opt/coolercontrol"
 mkdir -p "$CC_DIR"
@@ -299,7 +295,7 @@ After=multi-user.target coolercontrold.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/zotac-fan-enable.sh
+ExecStart=/usr/bin/zotac-fan-enable.sh
 RemainAfterExit=yes
 
 [Install]
