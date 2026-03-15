@@ -24,9 +24,3 @@ A custom Bazzite-based image makes these drivers persistent – they survive sys
   - Touchpad tweaks for more precise input.
   - HDR fix scripts for more reliable HDR activation in supported games
   - 144 Hz fixes (X11/Wayland configuration + Gamescope/KWin tuning) so the panel runs consistently at 144 Hz.
-- Convenience:
-  - Preinstalled Decky Loader & plugins
-
-
-- User: zotac
-- passwd: zotac <- pls change
