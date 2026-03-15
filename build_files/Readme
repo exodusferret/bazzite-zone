@@ -67,7 +67,7 @@ Use this method to build and serve the image entirely from your local machine.
   -v $(pwd):/build \
   ghcr.io/jasonn3/build-container-installer:latest \
   IMAGE_REPO=localhost \
-  IMAGE_NAME=zotac-bazzite \
+  IMAGE_NAME=bazzite_zone \
   IMAGE_TAG=latest \
   VERSION=41 \
   VARIANT=Kinoite
