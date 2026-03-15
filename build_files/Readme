@@ -1,18 +1,10 @@
-# Build Notes
-
-> **Before rebuilding:** Rename `iso-gnome.toml` or `iso-kde.toml` to `iso.toml`, commit the change, then rebuild the image.
-
 
 ## Local Build
 
-### Prerequisites
-
-| Resource | Requirement |
-|---|---|
-| VM Image | Fedora Workstation |
-| RAM | 8192 MB |
-| Disk Space | 80 GB |
-| Secure Boot | **Disabled** (Settings → Security) |
+ VM Image = Fedora Workstation 
+ RAM  8192 MB 
+ Disk Space = 80 GB 
+ Secure Boot **Disabled** (Settings → Security) |
 
 
 
