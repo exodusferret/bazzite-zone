@@ -314,3 +314,16 @@ echo "zotac:zotac" | chpasswd
 
 # SSH-Server (sshd) dauerhaft beim Systemstart aktivieren
 systemctl enable sshd.service
+
+### fix crash ####
+# 1. Den Modul-Baum aktualisieren, damit dracut die neuen Zotac-Treiber erkennt
+depmod -a ${KERNEL_VERSION}
+
+# 2. Den ganzen Build-Müll und die Entwickler-Tools wieder löschen! 
+# (dracut hasst kernel-devel Pakete im finalen Image)
+rpm-ostree uninstall -y kernel-devel-${KERNEL_VERSION} gcc make wget git
+
+# 3. Den temporären Ordner mit den Source-Codes löschen
+rm -rf /tmp/zotac_zone_build
+
+
