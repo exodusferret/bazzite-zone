@@ -5,9 +5,6 @@ minsize = "8 GiB"
 [customizations.installer.kickstart]
 contents = """
 %post
-useradd -m -G wheel zotac
-echo 'zotac:DEINPASSWORT' | chpasswd
-echo 'root:DEINPASSWORT' | chpasswd
 echo "PermitRootLogin yes" >> /etc/ssh/sshd_config
 %end
 """
