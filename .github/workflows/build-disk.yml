@@ -39,9 +39,84 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  precheck:
+    name: Check whether a new container image was published
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+    steps:
+      - name: Check workflow_run image metadata
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" != "workflow_run" ]]; then
+            echo "should_build=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          IMAGE_REPO="${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_NAME,,}"
+
+          mark_build_required() {
+            echo "$1"
+            echo "should_build=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          }
+
+          get_registry_token() {
+            curl -fsSL \
+              -u "${GITHUB_ACTOR}:${GH_TOKEN}" \
+              "https://ghcr.io/token?service=ghcr.io&scope=repository:${IMAGE_REPO}:pull" \
+              | jq -r '.token'
+          }
+
+          get_image_label() {
+            local token="$1"
+            local manifest config_digest
+
+            manifest="$(curl -fsSL \
+              -H "Authorization: Bearer ${token}" \
+              -H "Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
+              "https://ghcr.io/v2/${IMAGE_REPO}/manifests/${DEFAULT_TAG}")"
+            config_digest="$(jq -r '.config.digest // empty' <<< "${manifest}")"
+
+            if [[ -z "${config_digest}" ]]; then
+              return 1
+            fi
+
+            curl -fsSL \
+              -H "Authorization: Bearer ${token}" \
+              "https://ghcr.io/v2/${IMAGE_REPO}/blobs/${config_digest}" \
+              | jq -r '.config.Labels["io.github.bazzite-zone.workflow-run-id"] // empty'
+          }
+
+          IMAGE_TOKEN="$(get_registry_token)" || mark_build_required "Unable to inspect the current published image; continuing with disk builds."
+          LATEST_RUN_ID=""
+
+          if LATEST_RUN_ID="$(get_image_label "${IMAGE_TOKEN}" 2>/dev/null)"; then
+            :
+          else
+            LATEST_RUN_ID=""
+          fi
+
+          if [[ "${LATEST_RUN_ID}" == "${{ github.event.workflow_run.id }}" ]]; then
+            echo "A new container image was published by the triggering workflow."
+            echo "should_build=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "The triggering workflow did not publish a new latest image; skipping disk builds."
+            echo "should_build=false" >> "${GITHUB_OUTPUT}"
+          fi
+
   build:
     name: Build disk images
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    needs: precheck
+    if: needs.precheck.outputs.should_build == 'true' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     runs-on: ${{ inputs.platform == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     strategy:
       fail-fast: false

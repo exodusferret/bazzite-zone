@@ -26,8 +26,160 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  precheck:
+    name: Check for source changes
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      base_image_digest: ${{ steps.check.outputs.base_image_digest }}
+      openzotac_sha: ${{ steps.check.outputs.openzotac_sha }}
+      elektrocoder_sha256: ${{ steps.check.outputs.elektrocoder_sha256 }}
+      coolercontrol_url: ${{ steps.check.outputs.coolercontrol_url }}
+      source_fingerprint: ${{ steps.check.outputs.source_fingerprint }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Check whether a scheduled rebuild is needed
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IMAGE_REPO="${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_NAME,,}"
+          BASE_IMAGE_REPO="ublue-os/bazzite-deck"
+          BASE_IMAGE_TAG="stable"
+
+          mark_build_required() {
+            local reason="$1"
+
+            echo "${reason}"
+            echo "should_build=true" >> "${GITHUB_OUTPUT}"
+            echo "base_image_digest=" >> "${GITHUB_OUTPUT}"
+            echo "openzotac_sha=" >> "${GITHUB_OUTPUT}"
+            echo "elektrocoder_sha256=" >> "${GITHUB_OUTPUT}"
+            echo "coolercontrol_url=" >> "${GITHUB_OUTPUT}"
+            echo "source_fingerprint=" >> "${GITHUB_OUTPUT}"
+            exit 0
+          }
+
+          get_registry_token() {
+            local repo="$1"
+            local auth="${2:-}"
+
+            if [[ -n "${auth}" ]]; then
+              curl -fsSL \
+                -u "${GITHUB_ACTOR}:${auth}" \
+                "https://ghcr.io/token?service=ghcr.io&scope=repository:${repo}:pull" \
+                | jq -r '.token'
+            else
+              curl -fsSL \
+                "https://ghcr.io/token?service=ghcr.io&scope=repository:${repo}:pull" \
+                | jq -r '.token'
+            fi
+          }
+
+          get_manifest_digest() {
+            local repo="$1"
+            local ref="$2"
+            local token="$3"
+
+            curl -fsSI \
+              -H "Authorization: Bearer ${token}" \
+              -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
+              "https://ghcr.io/v2/${repo}/manifests/${ref}" \
+              | tr -d '\r' \
+              | awk -F': ' 'tolower($1) == "docker-content-digest" {print $2}'
+          }
+
+          get_image_label() {
+            local repo="$1"
+            local ref="$2"
+            local token="$3"
+            local label_name="$4"
+            local manifest config_digest
+
+            manifest="$(curl -fsSL \
+              -H "Authorization: Bearer ${token}" \
+              -H "Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
+              "https://ghcr.io/v2/${repo}/manifests/${ref}")"
+            config_digest="$(jq -r '.config.digest // empty' <<< "${manifest}")"
+
+            if [[ -z "${config_digest}" ]]; then
+              return 1
+            fi
+
+            curl -fsSL \
+              -H "Authorization: Bearer ${token}" \
+              "https://ghcr.io/v2/${repo}/blobs/${config_digest}" \
+              | jq -r --arg label_name "${label_name}" '.config.Labels[$label_name] // empty'
+          }
+
+          if [[ "${GITHUB_EVENT_NAME}" != "schedule" ]]; then
+            echo "should_build=true" >> "${GITHUB_OUTPUT}"
+            echo "base_image_digest=" >> "${GITHUB_OUTPUT}"
+            echo "openzotac_sha=" >> "${GITHUB_OUTPUT}"
+            echo "elektrocoder_sha256=" >> "${GITHUB_OUTPUT}"
+            echo "coolercontrol_url=" >> "${GITHUB_OUTPUT}"
+            echo "source_fingerprint=" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          OPENZONE_RAW="$(sed -n 's/^OPENZONE_RAW="\(.*\)"$/\1/p' build_files/build-modules.sh)"
+          ELEKTROCODER_RAW="$(sed -n 's/^ELEKTROCODER_RAW="\(.*\)"$/\1/p' build_files/build-modules.sh)"
+          COOLERCONTROL_VERSION="$(sed -n 's/^COOLERCONTROL_VERSION="\(.*\)"$/\1/p' build_files/build-modules.sh)"
+          COOLERCONTROL_URL="https://gitlab.com/coolercontrol/coolercontrol/-/releases/${COOLERCONTROL_VERSION}/downloads/packages/CoolerControlD-x86_64.AppImage"
+
+          OPENZOTAC_SHA="$(curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            "https://api.github.com/repos/OpenZotacZone/ZotacZone-Drivers/commits/main" \
+            | jq -r '.sha')" || mark_build_required "Unable to resolve the latest OpenZotac commit; continuing with a build."
+          ELEKTROCODER_SHA256="$(curl -fsSL "${ELEKTROCODER_RAW}/zotac-zone-platform.c" | sha256sum | awk '{print $1}')" || mark_build_required "Unable to hash the ElektroCoder source; continuing with a build."
+          BASE_IMAGE_TOKEN="$(get_registry_token "${BASE_IMAGE_REPO}")" || mark_build_required "Unable to authenticate to GHCR for the base image; continuing with a build."
+          BASE_IMAGE_DIGEST="$(get_manifest_digest "${BASE_IMAGE_REPO}" "${BASE_IMAGE_TAG}" "${BASE_IMAGE_TOKEN}")" || mark_build_required "Unable to resolve the base image digest; continuing with a build."
+
+          SOURCE_FINGERPRINT="$(printf '%s\n' \
+            "repo_sha=${GITHUB_SHA}" \
+            "openzotac_raw=${OPENZONE_RAW}" \
+            "openzotac_sha=${OPENZOTAC_SHA}" \
+            "elektrocoder_raw=${ELEKTROCODER_RAW}" \
+            "elektrocoder_sha256=${ELEKTROCODER_SHA256}" \
+            "coolercontrol_url=${COOLERCONTROL_URL}" \
+            "base_image=${BASE_IMAGE_REPO}:${BASE_IMAGE_TAG}@${BASE_IMAGE_DIGEST}" \
+            | sha256sum | awk '{print $1}')"
+
+          IMAGE_TOKEN="$(get_registry_token "${IMAGE_REPO}" "${GH_TOKEN}")" || mark_build_required "Unable to inspect the current published image; continuing with a build."
+          CURRENT_FINGERPRINT=""
+
+          if CURRENT_FINGERPRINT="$(get_image_label "${IMAGE_REPO}" "${DEFAULT_TAG}" "${IMAGE_TOKEN}" "io.github.bazzite-zone.source-fingerprint" 2>/dev/null)"; then
+            :
+          else
+            CURRENT_FINGERPRINT=""
+          fi
+
+          if [[ -n "${CURRENT_FINGERPRINT}" && "${CURRENT_FINGERPRINT}" == "${SOURCE_FINGERPRINT}" ]]; then
+            echo "No source changes detected for the scheduled build."
+            echo "should_build=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "Source changes detected or no previous image metadata found."
+            echo "should_build=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+          echo "base_image_digest=${BASE_IMAGE_DIGEST}" >> "${GITHUB_OUTPUT}"
+          echo "openzotac_sha=${OPENZOTAC_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "elektrocoder_sha256=${ELEKTROCODER_SHA256}" >> "${GITHUB_OUTPUT}"
+          echo "coolercontrol_url=${COOLERCONTROL_URL}" >> "${GITHUB_OUTPUT}"
+          echo "source_fingerprint=${SOURCE_FINGERPRINT}" >> "${GITHUB_OUTPUT}"
+
   build_push:
     name: Build and push image
+    needs: precheck
+    if: needs.precheck.outputs.should_build == 'true'
     runs-on: ubuntu-24.04
 
     permissions:
@@ -41,6 +193,30 @@ jobs:
           # Lowercase the image uri
           echo "IMAGE_REGISTRY=${IMAGE_REGISTRY,,}" >> ${GITHUB_ENV}
           echo "IMAGE_NAME=${IMAGE_NAME,,}" >> ${GITHUB_ENV}
+
+      - name: Prepare build labels
+        run: |
+          {
+            echo 'CUSTOM_LABELS<<EOF'
+            echo "io.github.bazzite-zone.repo-sha=${GITHUB_SHA}"
+            echo "io.github.bazzite-zone.workflow-run-id=${GITHUB_RUN_ID}"
+            if [[ -n "${{ needs.precheck.outputs.base_image_digest }}" ]]; then
+              echo "io.github.bazzite-zone.base-image-digest=${{ needs.precheck.outputs.base_image_digest }}"
+            fi
+            if [[ -n "${{ needs.precheck.outputs.openzotac_sha }}" ]]; then
+              echo "io.github.bazzite-zone.openzotac-sha=${{ needs.precheck.outputs.openzotac_sha }}"
+            fi
+            if [[ -n "${{ needs.precheck.outputs.elektrocoder_sha256 }}" ]]; then
+              echo "io.github.bazzite-zone.elektrocoder-sha256=${{ needs.precheck.outputs.elektrocoder_sha256 }}"
+            fi
+            if [[ -n "${{ needs.precheck.outputs.coolercontrol_url }}" ]]; then
+              echo "io.github.bazzite-zone.coolercontrol-url=${{ needs.precheck.outputs.coolercontrol_url }}"
+            fi
+            if [[ -n "${{ needs.precheck.outputs.source_fingerprint }}" ]]; then
+              echo "io.github.bazzite-zone.source-fingerprint=${{ needs.precheck.outputs.source_fingerprint }}"
+            fi
+            echo 'EOF'
+          } >> "${GITHUB_ENV}"
 
       # These stage versions are pinned by https://github.com/renovatebot/renovate
       - name: Checkout
@@ -117,10 +293,12 @@ jobs:
           # Syntax: https://docs.github.com/en/actions/learn-github-actions/expressions#format
           image: ${{ env.IMAGE_NAME }}
           tags: ${{ steps.metadata.outputs.tags }}
-          labels: ${{ steps.metadata.outputs.labels }}
           build-args: |
             SECUREBOOT_MOK_KEY_B64=${{ env.SECUREBOOT_MOK_KEY_B64 }}
             SECUREBOOT_MOK_CERT_B64=${{ env.SECUREBOOT_MOK_CERT_B64 }}
+          labels: |
+            ${{ steps.metadata.outputs.labels }}
+            ${{ env.CUSTOM_LABELS }}
           oci: false
 
       # Rechunk is a script that we use on Universal Blue to make sure there isnt a single huge layer when your image gets published.
