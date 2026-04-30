@@ -28,7 +28,7 @@ on:
       - './.github/workflows/build-disk.yml'
 
 env:
-  IMAGE_NAME: ${{ github.event.repository.name }}
+  IMAGE_NAME: "bazzite_zone"
   IMAGE_REGISTRY: "ghcr.io/${{ github.repository_owner }}"
   DEFAULT_TAG: "latest"
   BIB_IMAGE: "quay.io/centos-bootc/bootc-image-builder:latest"
@@ -41,6 +41,7 @@ concurrency:
 jobs:
   build:
     name: Build disk images
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ${{ inputs.platform == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     strategy:
       fail-fast: false
@@ -89,6 +90,17 @@ jobs:
           echo "CONFIG_FILE=${{ env.CONFIG_FILE }}"
           ls -l "${{ env.CONFIG_FILE }}"
           sed -n '1,40p' "${{ env.CONFIG_FILE }}"
+
+      - name: Log in to GHCR
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "${GHCR_TOKEN}" | sudo podman login ghcr.io -u "${GHCR_USER}" --password-stdin
+
+      - name: Pre-pull container image
+        run: |
+          sudo podman pull "${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.DEFAULT_TAG }}"
 
       - name: Build disk images
         id: build

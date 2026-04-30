@@ -1,75 +1,154 @@
-###########€#######################
-##       User: zotac             ##
-##  passwd: zotac <- pls change  ##
-###################################
+## Build Notes
 
+This file documents the current local and CI build flow for this repository.
+Use placeholder values such as `<repo-owner>`, `<repo-name>`, and `<image-name>`
+when adapting commands to another fork.
 
+## What The Repo Builds
 
-## Local Build
+- A bootc container image from `Containerfile`
+- A signed out-of-tree kernel module set for the target image
+- Optional disk artifacts from the container image:
+  - `qcow2`
+  - `anaconda-iso`
 
-VM-Image: Fedora Workstation 
-RAM | 8192 MB |
-Disk Space  80 GB 
-Secure Boot  **Disabled** (Settings → Security) 
+The primary CI workflows are:
 
-### Setup
+- `.github/workflows/build.yml`
+- `.github/workflows/build-disk.yml`
 
-    sudo dnf update -y
-    git clone https://github.com/zappelfryx/ZotacZoneHandheld-Bazzite.git
-    cd ZotacZoneHandheld-Bazzite
+## Current Image Defaults
 
-    # To update later:
-    # git pull
+- Image registry: `ghcr.io/<repo-owner>`
+- Image name: `bazzite_zone`
+- Default tag: `latest`
+- Disk build source image: `ghcr.io/<repo-owner>/bazzite_zone:latest`
 
----
+If you rename the image, keep `build.yml`, `build-disk.yml`, and any local commands in sync.
 
-### Option A – Build & Generate ISO (from Remote Registry)
+## Local Container Build
 
-    # Build the container image
-    podman build -t localhost ZotacZoneHandheld-Bazzite
+Build the container image locally:
 
-    # Create output directory
-    mkdir ~/iso-output
+```bash
+podman build -t localhost/bazzite_zone:latest .
+```
 
-    # Generate ISO
-    sudo podman run --rm -it --privileged \
-      -v /var/lib/containers/storage:/var/lib/containers/storage \
-      -v ~/iso-output:/build/iso \
-      ghcr.io/jasonn3/build-container-installer:latest \
-      IMAGE_REPO=ghcr.io/zappelfryx \
-      IMAGE_NAME=zotaczonehandheld-bazzite \
-      IMAGE_TAG=latest \
-      VERSION=41 \
-      VARIANT=Kinoite
+This builds the same `Containerfile` used by CI, including:
 
----
+- external module compilation
+- Secure Boot module signing when signing inputs are provided
+- image configuration from `build_files/configure-image.sh`
 
-### Option B – Build & Generate ISO (Fully Local)
+## Local Disk Image Build
 
-Use this method to build and serve the image entirely from your local machine.
+The repository CI uses `osbuild/bootc-image-builder-action` to generate disk images.
+For a local equivalent, first build or pull the container image, then run a bootc image
+builder container against it.
 
-    # 1. Build the image locally
-    cd ZotacZoneHandheld-Bazzite
-    podman build -t localhost/bazzite_zone:latest .
+Example using the ISO config:
 
-    # 2. Start a temporary local registry
-    podman run -d -p 5000:5000 --name local-registry docker.io/library/registry:2
-
-    # 3. Pull from GHCR, tag, and push to local registry
-    sudo podman pull ghcr.io/zappelfryx/zotaczonehandheld-bazzite:latest
-    sudo podman tag ghcr.io/zappelfryx/zotaczonehandheld-bazzite:latest localhost:5000/bazzite_zone:latest
-    sudo podman push --tls-verify=false localhost:5000/bazzite_zone:latest
-
-    # 4. Generate ISO directly from GHCR (no local registry)
-  
+```bash
+mkdir -p ~/image-output
 sudo podman run --rm -it --privileged \
-  --pull=never \
   -v /var/lib/containers/storage:/var/lib/containers/storage \
-  -v ~/iso-output:/output \
-  -v ~/ZotacZoneHandheld-Bazzite/disk_config/iso.toml:/config.toml:ro \
+  -v ~/image-output:/output \
+  -v "$PWD/disk_config/iso.toml:/config.toml:ro" \
   quay.io/centos-bootc/bootc-image-builder:latest \
   --type anaconda-iso \
   --rootfs xfs \
+  --config /config.toml \
   --output /output \
-  ghcr.io/zappelfryx/zotaczonehandheld-bazzite:latest
+  localhost/bazzite_zone:latest
+```
 
+Example using the disk config:
+
+```bash
+mkdir -p ~/image-output
+sudo podman run --rm -it --privileged \
+  -v /var/lib/containers/storage:/var/lib/containers/storage \
+  -v ~/image-output:/output \
+  -v "$PWD/disk_config/disk.toml:/config.toml:ro" \
+  quay.io/centos-bootc/bootc-image-builder:latest \
+  --type qcow2 \
+  --rootfs xfs \
+  --config /config.toml \
+  --output /output \
+  localhost/bazzite_zone:latest
+```
+
+Adjust the image reference if you want to build from a remote registry image instead of `localhost`.
+
+## CI Behavior
+
+`build.yml`:
+
+- builds the container image on pushes to `main`, pull requests, schedule, and manual dispatch
+- pushes to `ghcr.io/<repo-owner>` only on non-PR builds of the default branch
+- signs the pushed container image with Cosign on release builds
+- signs the out-of-tree kernel modules for Secure Boot on release builds
+
+`build-disk.yml`:
+
+- can be run manually
+- also runs automatically after a successful container-image workflow
+- produces `qcow2` and `anaconda-iso`
+- can upload artifacts either to GitHub Actions artifacts or to S3-compatible storage
+
+## Required Repository Secrets
+
+For release builds in `build.yml`:
+
+- `SIGNING_SECRET`
+- `COSIGN_PASSWORD`
+- `SECUREBOOT_MOK_KEY`
+- `SECUREBOOT_MOK_CERT`
+
+For optional S3 upload in `build-disk.yml`:
+
+- `S3_PROVIDER`
+- `S3_ACCESS_KEY_ID`
+- `S3_SECRET_ACCESS_KEY`
+- `S3_REGION`
+- `S3_ENDPOINT`
+- `S3_BUCKET_NAME`
+
+## Secure Boot Notes
+
+The out-of-tree modules are signed during image build and the public certificate is placed in:
+
+- `/usr/share/secureboot/zotac-zone-mok.der`
+- `/usr/share/secureboot/zotac-zone-mok.pem`
+- `/etc/pki/akmods/certs/akmods-zotac-zone.der`
+
+The image includes `/usr/bin/zotac-secureboot-enroll`, which queues MOK enrollment with `mokutil` in a Bazzite-compatible way.
+By default, the expected one-time MokManager password is `universalblue`.
+
+This enrolls this repository's Secure Boot certificate. It does not reuse or replace another project's certificate.
+
+## Neutral Placeholder Examples
+
+Clone a fork locally:
+
+```bash
+git clone https://github.com/<repo-owner>/<repo-name>.git
+cd <repo-name>
+```
+
+Pull a published image from GHCR:
+
+```bash
+sudo podman pull ghcr.io/<repo-owner>/<image-name>:latest
+```
+
+Tag it for local bootc image builds:
+
+```bash
+sudo podman tag ghcr.io/<repo-owner>/<image-name>:latest localhost/<image-name>:latest
+```
+
+## Notes
+
+- Avoid committing private signing material such as `cosign.key` or `secureboot/MOK.priv`.
+- The canonical project-level setup and secret-generation commands live in `README.md`.

@@ -1,94 +1,61 @@
 #!/bin/bash
 set -ouex pipefail
 
-# ==============================================================================
-#  Zotac Zone – Bazzite Custom Image Build Script
-# ==============================================================================
-
-echo "=== Starte Zotac Zone Build ==="
-
-OPENZONE_RAW="https://raw.githubusercontent.com/OpenZotacZone/ZotacZone-Drivers/refs/heads/main"
-ELEKTROCODER_RAW="https://gist.githubusercontent.com/ElektroCoder/c3ddfbe6dff057ab16375ab965876e74/raw/a7bdf061ca0613ef243e1e9851b70e886face4ea"
-HDR_RAW="https://raw.githubusercontent.com/OpenZotacZone/Zotac-Zone-HDR-144hz/refs/heads/main"
-
-# ==============================================================================
-# 1. ABHÄNGIGKEITEN
-# ==============================================================================
-echo "-> Installiere Build-Abhängigkeiten..."
+echo "=== Configure Zotac Zone Image ==="
 
 KERNEL_VERSION=$(ls /usr/lib/modules/ | grep -v 'debug' | sort -V | tail -n 1)
+EC_INSTALL_DIR="/usr/lib/zotac-zone-fan"
+DIAL_SCRIPT="/usr/bin/zotac_dial_daemon.py"
+CC_DIR="/var/opt/coolercontrol"
+SECUREBOOT_CERT="/usr/share/secureboot/zotac-zone-mok.der"
+SECUREBOOT_COMPAT_CERT_DIR="/etc/pki/akmods/certs"
+SECUREBOOT_COMPAT_CERT="${SECUREBOOT_COMPAT_CERT_DIR}/akmods-zotac-zone.der"
+SECUREBOOT_DEFAULT_PASSWORD="universalblue"
 
 rpm-ostree install \
-    kernel-devel-${KERNEL_VERSION} \
-    gcc \
-    make \
-    wget \
-    git \
-    python3-pip
+    mokutil \
+    python3-evdev
 
-pip install evdev --break-system-packages
+cat > /usr/bin/zotac-load-drivers << EOF
+#!/usr/bin/env bash
+set -euo pipefail
 
-# ==============================================================================
-# 2. OPENZONE HID + PLATFORM TREIBER
-# ==============================================================================
-echo "-> Baue OpenZONE HID & Platform Treiber..."
+CERT="${SECUREBOOT_CERT}"
 
-BUILD_DIR="/tmp/zotac_zone_build"
-DRIVER_INSTALL_DIR="/usr/lib/zotac-zone"
-mkdir -p "$BUILD_DIR" "$DRIVER_INSTALL_DIR"
-cd "$BUILD_DIR"
+log() {
+    echo "[zotac-load-drivers] \$*"
+}
 
-for f in \
-    "zotac-zone-hid-core.c" \
-    "zotac-zone-hid-rgb.c" \
-    "zotac-zone-hid-input.c" \
-    "zotac-zone-hid-config.c" \
-    "zotac-zone.h"
-do
-    wget -q "${OPENZONE_RAW}/driver/hid/${f}"
-done
+if command -v mokutil >/dev/null 2>&1 \
+    && [[ -r "\${CERT}" ]] \
+    && mokutil --sb-state 2>/dev/null | grep -qi "SecureBoot enabled" \
+    && ! mokutil --test-key "\${CERT}" >/dev/null 2>&1; then
+    log "Secure Boot is enabled and the Zotac MOK is not enrolled yet."
+    log "Run /usr/bin/zotac-secureboot-enroll, reboot, and complete the enrollment in MokManager."
+    exit 0
+fi
 
-for f in \
-    "zotac-zone-platform.c" \
-    "firmware_attributes_class.h" \
-    "firmware_attributes_class.c"
-do
-    wget -q "${OPENZONE_RAW}/driver/platform/${f}"
-done
-
-cat > Makefile << 'EOF'
-obj-m += zotac-zone-hid.o
-zotac-zone-hid-y := zotac-zone-hid-core.o zotac-zone-hid-rgb.o zotac-zone-hid-input.o zotac-zone-hid-config.o
-obj-m += firmware_attributes_class.o
-obj-m += zotac-zone-platform.o
-all:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
-clean:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
+/usr/sbin/modprobe led-class-multicolor
+/usr/sbin/modprobe platform_profile
+/usr/sbin/modprobe firmware_attributes_class
+/usr/sbin/modprobe zotac-zone-platform
+/usr/sbin/modprobe zotac-zone-hid
 EOF
-
-make -C /usr/lib/modules/${KERNEL_VERSION}/build M="$(pwd)" modules
-cp *.ko "$DRIVER_INSTALL_DIR/"
+chmod 700 /usr/bin/zotac-load-drivers
 
 cat > /usr/lib/systemd/system/zotac-zone-drivers.service << EOF
 [Unit]
 Description=Zotac Zone HID & Platform Drivers (OpenZONE)
-After=network.target
+After=local-fs.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/sbin/modprobe led-class-multicolor
-ExecStart=/usr/sbin/modprobe platform_profile
-ExecStart=/usr/sbin/insmod ${DRIVER_INSTALL_DIR}/firmware_attributes_class.ko
-ExecStart=/usr/sbin/insmod ${DRIVER_INSTALL_DIR}/zotac-zone-platform.ko
-ExecStart=/usr/sbin/insmod ${DRIVER_INSTALL_DIR}/zotac-zone-hid.ko
+ExecStart=/usr/bin/zotac-load-drivers
 RemainAfterExit=yes
 
 [Install]
 WantedBy=multi-user.target
 EOF
-
-systemctl enable zotac-zone-drivers.service
 
 cat > /usr/lib/udev/rules.d/99-zotac-zone.rules << 'EOF'
 KERNEL=="hidraw*", ATTRS{idVendor}=="1ee9", ATTRS{idProduct}=="1590", MODE="0666"
@@ -96,14 +63,7 @@ EOF
 
 echo "uinput" > /usr/lib/modules-load.d/zotac-uinput.conf
 
-# ==============================================================================
-# 3. DIAL DAEMON
-# ==============================================================================
-echo "-> Installiere Dial-Daemon..."
-
-DIAL_SCRIPT="/usr/bin/zotac_dial_daemon.py"
-
-cat > "$DIAL_SCRIPT" << 'PYEOF'
+cat > "${DIAL_SCRIPT}" << 'PYEOF'
 #!/usr/bin/env python3
 # Zotac Zone Dial Daemon (OpenZONE - Raw HID)
 import os, sys, glob, time, argparse
@@ -191,7 +151,7 @@ def main():
 if __name__ == "__main__":
     main()
 PYEOF
-chmod +x "$DIAL_SCRIPT"
+chmod +x "${DIAL_SCRIPT}"
 
 cat > /usr/lib/systemd/system/zotac-dials.service << EOF
 [Unit]
@@ -208,31 +168,48 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-systemctl enable zotac-dials.service
+install -d -m 755 "${SECUREBOOT_COMPAT_CERT_DIR}"
+ln -sf "${SECUREBOOT_CERT}" "${SECUREBOOT_COMPAT_CERT}"
 
-# ==============================================================================
-# 4. EC FAN TREIBER + COOLERCONTROL
-# ==============================================================================
-echo "-> Baue EC Fan-Treiber & installiere CoolerControl..."
+cat > /usr/bin/zotac-secureboot-enroll << EOF
+#!/usr/bin/env bash
+set -euo pipefail
 
-EC_BUILD_DIR="/tmp/zotac_ec_fan_build"
-EC_INSTALL_DIR="/usr/lib/zotac-zone-fan"
-mkdir -p "$EC_BUILD_DIR" "$EC_INSTALL_DIR"
-cd "$EC_BUILD_DIR"
+CERT="${SECUREBOOT_COMPAT_CERT}"
+DEFAULT_PASSWORD="${SECUREBOOT_DEFAULT_PASSWORD}"
 
-wget -q -O zotac-zone-platform.c \
-    "${ELEKTROCODER_RAW}/zotac-zone-platform.c"
+log() {
+    echo "[zotac-secureboot] \$*"
+}
 
-cat > Makefile << 'EOF'
-obj-m += zotac-zone-platform.o
-all:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
-clean:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
+if [[ ! -r "\${CERT}" ]]; then
+    log "No MOK certificate found at \${CERT}; skipping."
+    exit 0
+fi
+
+if ! command -v mokutil >/dev/null 2>&1; then
+    log "mokutil is not installed; skipping."
+    exit 0
+fi
+
+if ! mokutil --sb-state 2>/dev/null | grep -qi "SecureBoot enabled"; then
+    log "Secure Boot is not enabled; no enrollment needed."
+    exit 0
+fi
+
+if mokutil --test-key "\${CERT}" >/dev/null 2>&1; then
+    log "MOK certificate is already enrolled."
+    exit 0
+fi
+
+mokutil --timeout -1 || true
+log "The next prompt is for a one-time MOK password."
+log "Use '\${DEFAULT_PASSWORD}' to match the Universal Blue workflow."
+mokutil --import "\${CERT}"
+log "Enrollment request queued."
+log "Reboot, choose Enroll MOK in MokManager, and enter '\${DEFAULT_PASSWORD}'."
 EOF
-
-make -C /usr/lib/modules/${KERNEL_VERSION}/build M="$(pwd)" modules
-cp zotac-zone-platform.ko "$EC_INSTALL_DIR/"
+chmod 700 /usr/bin/zotac-secureboot-enroll
 
 cat > /usr/bin/zotac-fan-enable.sh << EOF
 #!/usr/bin/env bash
@@ -249,21 +226,6 @@ echo "[*] Starte CoolerControl neu..."
 echo "[+] Fan-Setup abgeschlossen."
 EOF
 chmod +x /usr/bin/zotac-fan-enable.sh
-
-# CoolerControl (Offiziell – GitLab, feste Version 4.0.1)
-CC_DIR=/var/opt/coolercontrol
-mkdir -p "$CC_DIR"
-
-COOLERCONTROL_VERSION="4.0.1"
-CC_DOWNLOAD_URL="https://gitlab.com/coolercontrol/coolercontrol/-/releases/${COOLERCONTROL_VERSION}/downloads/packages/CoolerControlD-x86_64.AppImage"
-
-echo "-> Lade CoolerControlD ${COOLERCONTROL_VERSION}..."
-if ! curl -fL -o "${CC_DIR}/CoolerControlD-x86_64.AppImage" "$CC_DOWNLOAD_URL"; then
-    echo "Fehler: Konnte CoolerControlD von $CC_DOWNLOAD_URL nicht herunterladen" >&2
-    exit 1
-fi
-
-chmod +x "${CC_DIR}/CoolerControlD-x86_64.AppImage"
 
 cat > /usr/lib/systemd/system/coolercontrold.service << EOF
 [Unit]
@@ -299,31 +261,13 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 EOF
 
+systemctl enable zotac-zone-drivers.service
+systemctl enable zotac-dials.service
 systemctl enable coolercontrold.service
 systemctl enable zotac-fan.service
 
-# ==============================================================================
-# 5. BENUTZERKONFIGURATION & DIENSTE
-# ==============================================================================
-echo "-> Richte Standard-Benutzer und Dienste ein..."
+# useradd -m -G wheel zotac
+# echo "zotac:zotac" | chpasswd
 
-# WICHTIGER HINWEIS: Der Benutzer und das Passwort sind standardmäßig auf 'zotac' gesetzt.
-# Bitte ändere das Passwort direkt nach dem ersten Login über die Systemeinstellungen!
-useradd -m -G wheel zotac
-echo "zotac:zotac" | chpasswd
-
-# SSH-Server (sshd) dauerhaft beim Systemstart aktivieren
 systemctl enable sshd.service
-
-### fix crash ####
-# 1. Den Modul-Baum aktualisieren, damit dracut die neuen Zotac-Treiber erkennt
-depmod -a ${KERNEL_VERSION}
-
-# 2. Den ganzen Build-Müll und die Entwickler-Tools wieder löschen! 
-# (dracut hasst kernel-devel Pakete im finalen Image)
-rpm-ostree uninstall -y kernel-devel-${KERNEL_VERSION} gcc make wget git
-
-# 3. Den temporären Ordner mit den Source-Codes löschen
-rm -rf /tmp/zotac_zone_build
-
-
+depmod -a "${KERNEL_VERSION}"

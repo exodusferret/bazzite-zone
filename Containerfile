@@ -2,6 +2,36 @@
 FROM scratch AS ctx
 COPY build_files /
 
+# Build external artifacts in an isolated stage so toolchains never land in the final image.
+FROM ghcr.io/ublue-os/bazzite-deck:stable as artifact-builder
+
+ARG SECUREBOOT_MOK_KEY_B64=""
+ARG SECUREBOOT_MOK_CERT_B64=""
+
+RUN if grep -Rqs "^\[updates-archive\]" /etc/yum.repos.d; then \
+      for f in /etc/yum.repos.d/*.repo; do \
+        if grep -q "^\[updates-archive\]" "$f"; then \
+          sed -i '/^\[updates-archive\]/,/^\[/ s/^enabled=.*/enabled=0/' "$f"; \
+        fi; \
+      done; \
+    fi || true
+
+RUN if grep -Rqs "^\[terra-mesa\]" /etc/yum.repos.d; then \
+      for f in /etc/yum.repos.d/*.repo; do \
+        if grep -q "^\[terra-mesa\]" "$f"; then \
+          sed -i '/^\[terra-mesa\]/,/^\[/ s/^enabled=.*/enabled=0/' "$f"; \
+        fi; \
+      done; \
+    fi || true
+
+RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
+    --mount=type=cache,dst=/var/cache \
+    --mount=type=cache,dst=/var/log \
+    --mount=type=tmpfs,dst=/tmp \
+    SECUREBOOT_MOK_KEY_B64="${SECUREBOOT_MOK_KEY_B64}" \
+    SECUREBOOT_MOK_CERT_B64="${SECUREBOOT_MOK_CERT_B64}" \
+    bash /ctx/build-modules.sh
+
 # Base Image
 FROM ghcr.io/ublue-os/bazzite-deck:stable as bazzite-zone-deck
 
@@ -26,14 +56,14 @@ FROM ghcr.io/ublue-os/bazzite-deck:stable as bazzite-zone-deck
 # RUN rm /opt && mkdir /opt
 
 ### MODIFICATIONS
-## make modifications desired in your image and install packages by modifying the build.sh script
-## the following RUN directive does all the things required to run "build.sh" as recommended.
-
-RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
-    --mount=type=cache,dst=/var/cache \
-    --mount=type=cache,dst=/var/log \
-    --mount=type=tmpfs,dst=/tmp \
-    /ctx/build.sh
+## Disable repos that have recently caused FC43 depsolve failures.
+RUN if grep -Rqs "^\[updates-archive\]" /etc/yum.repos.d; then \
+      for f in /etc/yum.repos.d/*.repo; do \
+        if grep -q "^\[updates-archive\]" "$f"; then \
+          sed -i '/^\[updates-archive\]/,/^\[/ s/^enabled=.*/enabled=0/' "$f"; \
+        fi; \
+      done; \
+    fi || true
 
 # terra-mesa Repo deaktivieren
 RUN if grep -Rqs "^\[terra-mesa\]" /etc/yum.repos.d; then \
@@ -43,6 +73,15 @@ RUN if grep -Rqs "^\[terra-mesa\]" /etc/yum.repos.d; then \
         fi; \
       done; \
     fi || true
+
+COPY --from=artifact-builder /artifacts/ /
+
+## make modifications desired in your image and install packages by modifying the build scripts.
+RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
+    --mount=type=cache,dst=/var/cache \
+    --mount=type=cache,dst=/var/log \
+    --mount=type=tmpfs,dst=/tmp \
+    bash /ctx/configure-image.sh
 
 ### LINTING
 ## Verify final image and contents are correct.

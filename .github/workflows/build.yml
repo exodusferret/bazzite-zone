@@ -92,6 +92,21 @@ jobs:
           sep-tags: " "
           sep-annotations: " "
 
+      - name: Prepare Secure Boot signing inputs
+        run: |
+          if [[ "${{ github.event_name }}" != "pull_request" && "${{ github.ref }}" == "refs/heads/${{ github.event.repository.default_branch }}" ]]; then
+            if [[ -z "${{ secrets.SECUREBOOT_MOK_KEY }}" || -z "${{ secrets.SECUREBOOT_MOK_CERT }}" ]]; then
+              echo "SECUREBOOT_MOK_KEY and SECUREBOOT_MOK_CERT must be configured for release builds." >&2
+              exit 1
+            fi
+
+            echo "SECUREBOOT_MOK_KEY_B64=$(printf '%s' '${{ secrets.SECUREBOOT_MOK_KEY }}' | base64 -w0)" >> "${GITHUB_ENV}"
+            echo "SECUREBOOT_MOK_CERT_B64=$(printf '%s' '${{ secrets.SECUREBOOT_MOK_CERT }}' | base64 -w0)" >> "${GITHUB_ENV}"
+          else
+            echo "SECUREBOOT_MOK_KEY_B64=" >> "${GITHUB_ENV}"
+            echo "SECUREBOOT_MOK_CERT_B64=" >> "${GITHUB_ENV}"
+          fi
+
       - name: Build Image
         id: build_image
         uses: redhat-actions/buildah-build@7a95fa7ee0f02d552a32753e7414641a04307056 # v2
@@ -103,6 +118,9 @@ jobs:
           image: ${{ env.IMAGE_NAME }}
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
+          build-args: |
+            SECUREBOOT_MOK_KEY_B64=${{ env.SECUREBOOT_MOK_KEY_B64 }}
+            SECUREBOOT_MOK_CERT_B64=${{ env.SECUREBOOT_MOK_CERT_B64 }}
           oci: false
 
       # Rechunk is a script that we use on Universal Blue to make sure there isnt a single huge layer when your image gets published.
@@ -167,10 +185,15 @@ jobs:
         if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
         run: |
           IMAGE_FULL="${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}"
+          DIGEST="${{ steps.push.outputs.digest }}"
+          IMAGES=""
+
           for tag in ${{ steps.metadata.outputs.tags }}; do
-            cosign sign -y --key env://COSIGN_PRIVATE_KEY $IMAGE_FULL:$tag
+            IMAGES+="$IMAGE_FULL:$tag@$DIGEST "
           done
+
+          cosign sign -y --key env://COSIGN_PRIVATE_KEY $IMAGES
         env:
-          TAGS: ${{ steps.push.outputs.digest }}
           COSIGN_EXPERIMENTAL: false
           COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
