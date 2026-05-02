@@ -12,6 +12,12 @@ A custom Bazzite-based image makes these drivers persistent – they survive sys
 - Zotac-specific adjustments: [https://github.com/Reed-Schimmel/ZotacBazzite](https://github.com/Reed-Schimmel/ZotacBazzite)  
 - Official Universal Blue image template: [https://github.com/ublue-os/image-template](https://github.com/ublue-os/image-template)
 
+## Disclaimer
+
+This project is provided as-is, without warranty of any kind, express or implied.
+Use it at your own risk.
+The authors and contributors accept no liability for hardware damage, data loss, failed updates, or any other issues resulting from the use, modification, or redistribution of this image or the included scripts.
+
 ## Features
 
 - Integrated OpenZotacZone drivers, baked into the image and automatically loaded on boot.
@@ -71,7 +77,8 @@ Default boot-time behavior:
 3. If the certificate is not enrolled, `zotac-zone-drivers.service` does not load the Zotac modules yet.
 4. Run `sudo /usr/bin/zotac-secureboot-enroll`.
 5. The helper runs `mokutil --timeout -1` and `mokutil --import /etc/pki/akmods/certs/akmods-zotac-zone.der`.
-6. On the next boot, MokManager appears and you must confirm the enrollment manually.
+6. It only reports `Enrollment request queued.` after confirming the certificate appears in `mokutil --list-new`.
+7. On the next boot, MokManager appears and you must confirm the enrollment manually.
 
 Queue enrollment manually:
 
