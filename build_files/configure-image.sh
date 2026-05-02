@@ -7,6 +7,7 @@ KERNEL_VERSION=$(ls /usr/lib/modules/ | grep -v 'debug' | sort -V | tail -n 1)
 EC_INSTALL_DIR="/usr/lib/zotac-zone-fan"
 DIAL_SCRIPT="/usr/bin/zotac_dial_daemon.py"
 CC_DIR="/var/opt/coolercontrol"
+STEAM_MONITOR_STATE_DIR="/run/zotac-zone-monitor"
 SECUREBOOT_CERT="/usr/share/secureboot/zotac-zone-mok.der"
 SECUREBOOT_COMPAT_CERT_DIR="/etc/pki/akmods/certs"
 SECUREBOOT_COMPAT_CERT="${SECUREBOOT_COMPAT_CERT_DIR}/akmods-zotac-zone.der"
@@ -43,6 +44,50 @@ fi
 EOF
 chmod 700 /usr/bin/zotac-load-drivers
 
+cat > /usr/bin/zotac-recover-input << EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+log() {
+    echo "[zotac-recover-input] \$*"
+}
+
+log "Reloading Zotac input stack"
+
+/usr/sbin/modprobe uinput || true
+/usr/bin/systemctl restart zotac-zone-drivers.service
+/usr/bin/udevadm control --reload-rules || true
+/usr/bin/udevadm trigger --subsystem-match=hidraw || true
+/usr/bin/systemctl restart zotac-dials.service
+EOF
+chmod 700 /usr/bin/zotac-recover-input
+
+cat > /usr/bin/zotac-monitor-steam-exit << EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+STATE_DIR="${STEAM_MONITOR_STATE_DIR}"
+STATE_FILE="\${STATE_DIR}/steam-active"
+
+steam_running() {
+    /usr/bin/pgrep -x steam >/dev/null 2>&1 \
+        || /usr/bin/pgrep -f '/steam(|-webhelper|deckui)' >/dev/null 2>&1
+}
+
+mkdir -p "\${STATE_DIR}"
+
+if steam_running; then
+    : > "\${STATE_FILE}"
+    exit 0
+fi
+
+if [[ -f "\${STATE_FILE}" ]]; then
+    rm -f "\${STATE_FILE}"
+    /usr/bin/zotac-recover-input
+fi
+EOF
+chmod 700 /usr/bin/zotac-monitor-steam-exit
+
 cat > /usr/lib/systemd/system/zotac-zone-drivers.service << EOF
 [Unit]
 Description=Zotac Zone HID & Platform Drivers (OpenZONE)
@@ -55,6 +100,29 @@ RemainAfterExit=yes
 
 [Install]
 WantedBy=multi-user.target
+EOF
+
+cat > /usr/lib/systemd/system/zotac-steam-exit-monitor.service << EOF
+[Unit]
+Description=Recover Zotac input stack when Steam exits
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/zotac-monitor-steam-exit
+EOF
+
+cat > /usr/lib/systemd/system/zotac-steam-exit-monitor.timer << EOF
+[Unit]
+Description=Poll for Steam exit to recover Zotac input stack
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=10s
+Unit=zotac-steam-exit-monitor.service
+
+[Install]
+WantedBy=timers.target
 EOF
 
 cat > /usr/lib/udev/rules.d/99-zotac-zone.rules << 'EOF'
@@ -182,6 +250,19 @@ log() {
     echo "[zotac-secureboot] \$*"
 }
 
+cert_fingerprint() {
+    openssl x509 -inform DER -in "\$1" -noout -fingerprint | cut -d= -f2
+}
+
+fingerprint_in_mok_list() {
+    local fingerprint list_output
+
+    fingerprint="\$(printf '%s' "\$1" | tr '[:lower:]' '[:upper:]')"
+    list_output="\$2"
+
+    printf '%s\n' "\${list_output}" | tr '[:lower:]' '[:upper:]' | grep -Fq "\${fingerprint}"
+}
+
 if [[ ! -r "\${CERT}" ]]; then
     log "No MOK certificate found at \${CERT}; skipping."
     exit 0
@@ -197,7 +278,11 @@ if ! mokutil --sb-state 2>/dev/null | grep -qi "SecureBoot enabled"; then
     exit 0
 fi
 
-if mokutil --test-key "\${CERT}" >/dev/null 2>&1; then
+CERT_FINGERPRINT="\$(cert_fingerprint "\${CERT}")"
+ENROLLED_KEYS="\$(mokutil --list-enrolled 2>/dev/null || true)"
+
+if mokutil --test-key "\${CERT}" >/dev/null 2>&1 \
+    || fingerprint_in_mok_list "\${CERT_FINGERPRINT}" "\${ENROLLED_KEYS}"; then
     log "MOK certificate is already enrolled."
     exit 0
 fi
@@ -205,9 +290,24 @@ fi
 mokutil --timeout -1 || true
 log "The next prompt is for a one-time MOK password."
 log "Use '\${DEFAULT_PASSWORD}' to match the Universal Blue workflow."
-mokutil --import "\${CERT}"
-log "Enrollment request queued."
-log "Reboot, choose Enroll MOK in MokManager, and enter '\${DEFAULT_PASSWORD}'."
+IMPORT_OUTPUT="\$(mokutil --import "\${CERT}" 2>&1)"
+printf '%s\n' "\${IMPORT_OUTPUT}"
+
+if mokutil --test-key "\${CERT}" >/dev/null 2>&1 \
+    || fingerprint_in_mok_list "\${CERT_FINGERPRINT}" "\${ENROLLED_KEYS}"; then
+    log "MOK certificate is already enrolled; no new enrollment was queued."
+    exit 0
+fi
+
+PENDING_KEYS="\$(mokutil --list-new 2>/dev/null || true)"
+
+if fingerprint_in_mok_list "\${CERT_FINGERPRINT}" "\${PENDING_KEYS}"; then
+    log "Enrollment request queued."
+    log "Reboot, choose Enroll MOK in MokManager, and enter '\${DEFAULT_PASSWORD}'."
+else
+    log "Import completed, but a pending MOK enrollment could not be confirmed."
+    log "Check 'mokutil --list-new' before rebooting."
+fi
 EOF
 chmod 700 /usr/bin/zotac-secureboot-enroll
 
@@ -263,6 +363,7 @@ EOF
 
 systemctl enable zotac-zone-drivers.service
 systemctl enable zotac-dials.service
+systemctl enable zotac-steam-exit-monitor.timer
 systemctl enable coolercontrold.service
 systemctl enable zotac-fan.service
 
