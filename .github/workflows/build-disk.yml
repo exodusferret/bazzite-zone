@@ -173,21 +173,25 @@ jobs:
         run: |
           echo "${GHCR_TOKEN}" | sudo podman login ghcr.io -u "${GHCR_USER}" --password-stdin
 
-      - name: Pre-pull container image
-        run: |
-          sudo podman pull "${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.DEFAULT_TAG }}"
-
       - name: Build disk images
         id: build
-        uses: osbuild/bootc-image-builder-action@main
-        with:
-          builder-image: ${{ env.BIB_IMAGE }}
-          config-file: ${{ env.CONFIG_FILE }}
-          image: ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.DEFAULT_TAG }}
-          chown: ${{ env.USER_UID }}:${{ env.USER_GID }}
-          types: ${{ matrix['disk-type'] }}
-          additional-args: --use-librepo=True
-          rootfs: xfs
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUTPUT_DIR="${GITHUB_WORKSPACE}/output"
+          rm -rf "${OUTPUT_DIR}"
+          mkdir -p "${OUTPUT_DIR}"
+
+          ./build_files/run-bootc-image-builder.sh \
+            "${{ env.BIB_IMAGE }}" \
+            "${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.DEFAULT_TAG }}" \
+            "${{ matrix['disk-type'] }}" \
+            "${{ env.CONFIG_FILE }}" \
+            "${OUTPUT_DIR}" \
+            "xfs" \
+            "${{ env.USER_UID }}:${{ env.USER_GID }}"
+
+          echo "output-directory=${OUTPUT_DIR}" >> "${GITHUB_OUTPUT}"
 
       - name: Upload disk images and Checksum to Job Artifacts
         if: inputs.upload-to-s3 != true && github.event_name != 'pull_request'

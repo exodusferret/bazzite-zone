@@ -77,40 +77,36 @@ Notes:
 
 ## Local Disk Image Build
 
-The repository CI uses `osbuild/bootc-image-builder-action` to generate disk images.
-For a local equivalent, first build or pull the container image, then run a bootc image
-builder container against it.
+The repository CI uses `build_files/run-bootc-image-builder.sh` to generate disk images.
+The script pre-pulls the builder and target images with retries, retags the builder image
+locally, and then runs it with `--pull=never` to avoid transient registry failures during
+the actual build. For local use, first build or pull the container image, then invoke the
+same helper.
 
 Example using the ISO config:
 
 ```bash
 mkdir -p ~/image-output
-sudo podman run --rm -it --privileged \
-  -v /var/lib/containers/storage:/var/lib/containers/storage \
-  -v ~/image-output:/output \
-  -v "$PWD/disk_config/iso-kde.toml:/config.toml:ro" \
+./build_files/run-bootc-image-builder.sh \
   quay.io/centos-bootc/bootc-image-builder:latest \
-  --type anaconda-iso \
-  --rootfs xfs \
-  --config /config.toml \
-  --output /output \
-  localhost/bazzite_zone:latest
+  localhost/bazzite_zone:latest \
+  anaconda-iso \
+  "$PWD/disk_config/iso-kde.toml" \
+  "$HOME/image-output" \
+  xfs
 ```
 
 Example using the disk config:
 
 ```bash
 mkdir -p ~/image-output
-sudo podman run --rm -it --privileged \
-  -v /var/lib/containers/storage:/var/lib/containers/storage \
-  -v ~/image-output:/output \
-  -v "$PWD/disk_config/disk.toml:/config.toml:ro" \
+./build_files/run-bootc-image-builder.sh \
   quay.io/centos-bootc/bootc-image-builder:latest \
-  --type qcow2 \
-  --rootfs xfs \
-  --config /config.toml \
-  --output /output \
-  localhost/bazzite_zone:latest
+  localhost/bazzite_zone:latest \
+  qcow2 \
+  "$PWD/disk_config/disk.toml" \
+  "$HOME/image-output" \
+  xfs
 ```
 
 Adjust the image reference if you want to build from a remote registry image instead of `localhost`.
