@@ -4,10 +4,12 @@ set -ouex pipefail
 echo "=== Build Zotac Zone Artifacts ==="
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="${REPO_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+VENDOR_ROOT="${VENDOR_ROOT:-${REPO_ROOT}/vendor}"
 OPENZOTAC_REPO_URL="https://github.com/OpenZotacZone/ZotacZone-Drivers.git"
-OPENZOTAC_REPO_DIR="/vendor/OpenZotacZone"
+OPENZOTAC_REPO_DIR="${VENDOR_ROOT}/OpenZotacZone"
 ELEKTROCODER_REPO_URL="https://gist.github.com/ElektroCoder/c3ddfbe6dff057ab16375ab965876e74.git"
-ELEKTROCODER_REPO_DIR="/vendor/ElektroCoder-zotac-zone-platform"
+ELEKTROCODER_REPO_DIR="${VENDOR_ROOT}/ElektroCoder-zotac-zone-platform"
 OPENZOTAC_REV="${OPENZOTAC_REV:-unknown}"
 ELEKTROCODER_REV="${ELEKTROCODER_REV:-unknown}"
 
