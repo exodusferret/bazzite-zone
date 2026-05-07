@@ -24,7 +24,7 @@ on:
       - main
     paths:
       - './disk_config/disk.toml'
-      - './disk_config/iso.toml'
+      - './disk_config/iso-kde.toml'
       - './.github/workflows/build-disk.yml'
 
 env:
@@ -142,7 +142,7 @@ jobs:
           echo "USER_UID=${USER_UID}" >> "${GITHUB_ENV}"
           echo "USER_GID=${USER_GID}" >> "${GITHUB_ENV}"
           if [ "${{ matrix['disk-type'] }}" = "anaconda-iso" ]; then
-            echo "CONFIG_FILE=./disk_config/iso.toml" >> "${GITHUB_ENV}"
+            echo "CONFIG_FILE=./disk_config/iso-kde.toml" >> "${GITHUB_ENV}"
           else
             echo "CONFIG_FILE=./disk_config/disk.toml" >> "${GITHUB_ENV}"
           fi
@@ -186,6 +186,7 @@ jobs:
           image: ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.DEFAULT_TAG }}
           chown: ${{ env.USER_UID }}:${{ env.USER_GID }}
           types: ${{ matrix['disk-type'] }}
+          additional-args: --use-librepo=True
           rootfs: xfs
 
       - name: Upload disk images and Checksum to Job Artifacts

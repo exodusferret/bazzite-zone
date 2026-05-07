@@ -53,7 +53,7 @@ mkdir -p ~/image-output
 sudo podman run --rm -it --privileged \
   -v /var/lib/containers/storage:/var/lib/containers/storage \
   -v ~/image-output:/output \
-  -v "$PWD/disk_config/iso.toml:/config.toml:ro" \
+  -v "$PWD/disk_config/iso-kde.toml:/config.toml:ro" \
   quay.io/centos-bootc/bootc-image-builder:latest \
   --type anaconda-iso \
   --rootfs xfs \
