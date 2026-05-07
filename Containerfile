@@ -1,13 +1,15 @@
 # Allow build scripts to be referenced without being copied into the final image
 FROM scratch AS ctx
-COPY build_files /
+COPY build_files /build_files
+COPY vendor /vendor
 
 # Build external artifacts in an isolated stage so toolchains never land in the final image.
 FROM ghcr.io/ublue-os/bazzite-deck:stable as artifact-builder
 
 ARG SECUREBOOT_MOK_KEY_B64=""
 ARG SECUREBOOT_MOK_CERT_B64=""
-ARG OPENZOTAC_SHA=""
+ARG OPENZOTAC_REV="unknown"
+ARG ELEKTROCODER_REV="unknown"
 
 RUN if grep -Rqs "^\[updates-archive\]" /etc/yum.repos.d; then \
       for f in /etc/yum.repos.d/*.repo; do \
@@ -29,10 +31,11 @@ RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     --mount=type=cache,dst=/var/cache \
     --mount=type=cache,dst=/var/log \
     --mount=type=tmpfs,dst=/tmp \
-    OPENZOTAC_SHA="${OPENZOTAC_SHA}" \
+    OPENZOTAC_REV="${OPENZOTAC_REV}" \
+    ELEKTROCODER_REV="${ELEKTROCODER_REV}" \
     SECUREBOOT_MOK_KEY_B64="${SECUREBOOT_MOK_KEY_B64}" \
     SECUREBOOT_MOK_CERT_B64="${SECUREBOOT_MOK_CERT_B64}" \
-    bash /ctx/build-modules.sh
+    bash /ctx/build_files/build-modules.sh
 
 # Base Image
 FROM ghcr.io/ublue-os/bazzite-deck:stable as bazzite-zone-deck
@@ -83,7 +86,7 @@ RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     --mount=type=cache,dst=/var/cache \
     --mount=type=cache,dst=/var/log \
     --mount=type=tmpfs,dst=/tmp \
-    bash /ctx/configure-image.sh
+    bash /ctx/build_files/configure-image.sh
 
 ### LINTING
 ## Verify final image and contents are correct.

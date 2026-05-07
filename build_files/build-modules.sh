@@ -3,13 +3,18 @@ set -ouex pipefail
 
 echo "=== Build Zotac Zone Artifacts ==="
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OPENZOTAC_REPO_URL="https://github.com/OpenZotacZone/ZotacZone-Drivers.git"
-OPENZOTAC_SHA="${OPENZOTAC_SHA:-}"
-ELEKTROCODER_RAW="https://gist.githubusercontent.com/ElektroCoder/c3ddfbe6dff057ab16375ab965876e74/raw/a7bdf061ca0613ef243e1e9851b70e886face4ea"
+OPENZOTAC_REPO_DIR="/vendor/OpenZotacZone"
+ELEKTROCODER_REPO_URL="https://gist.github.com/ElektroCoder/c3ddfbe6dff057ab16375ab965876e74.git"
+ELEKTROCODER_REPO_DIR="/vendor/ElektroCoder-zotac-zone-platform"
+OPENZOTAC_REV="${OPENZOTAC_REV:-unknown}"
+ELEKTROCODER_REV="${ELEKTROCODER_REV:-unknown}"
+
+source "${SCRIPT_DIR}/dependencies.env"
 
 KERNEL_VERSION=$(ls /usr/lib/modules/ | grep -v 'debug' | sort -V | tail -n 1)
 ARTIFACT_ROOT="/artifacts"
-OPENZOTAC_REPO_DIR="/tmp/OpenZotacZone"
 OPENZONE_BUILD_DIR="/tmp/zotac_zone_build"
 EC_BUILD_DIR="/tmp/zotac_ec_fan_build"
 OPENZOTAC_SOURCE_BUNDLE_DIR="/tmp/openzotaczone-corresponding-source"
@@ -43,28 +48,31 @@ dnf5 -y install --setopt=install_weak_deps=False \
     kernel-devel-${KERNEL_VERSION} \
     gcc \
     make \
-    openssl \
-    wget \
-    git
+    openssl
 
 if [[ -n "${SECUREBOOT_MOK_KEY_B64}" && -n "${SECUREBOOT_MOK_CERT_B64}" ]]; then
     printf '%s' "${SECUREBOOT_MOK_KEY_B64}" | base64 -d > "${SECUREBOOT_KEY_PATH}"
     printf '%s' "${SECUREBOOT_MOK_CERT_B64}" | base64 -d > "${SECUREBOOT_CERT_PATH}"
 fi
 
-fetch_openzotac_repo() {
-    rm -rf "${OPENZOTAC_REPO_DIR}"
-    git init "${OPENZOTAC_REPO_DIR}"
-    git -C "${OPENZOTAC_REPO_DIR}" remote add origin "${OPENZOTAC_REPO_URL}"
+require_vendor_checkout() {
+    local path="$1"
+    local name="$2"
+    shift 2
 
-    if [[ -n "${OPENZOTAC_SHA}" ]]; then
-        git -C "${OPENZOTAC_REPO_DIR}" fetch --depth 1 origin "${OPENZOTAC_SHA}"
-    else
-        git -C "${OPENZOTAC_REPO_DIR}" fetch --depth 1 origin main
+    if [[ ! -d "${path}" ]]; then
+        echo "Missing vendored dependency checkout at ${path} (${name})."
+        echo "Run: git submodule update --init --recursive"
+        exit 1
     fi
 
-    git -C "${OPENZOTAC_REPO_DIR}" checkout --detach FETCH_HEAD
-    git -C "${OPENZOTAC_REPO_DIR}" rev-parse HEAD
+    for required_path in "$@"; do
+        if [[ ! -e "${path}/${required_path}" ]]; then
+            echo "Vendored dependency ${name} is missing ${required_path}."
+            echo "Run: git submodule update --init --recursive"
+            exit 1
+        fi
+    done
 }
 
 extract_upstream_dial_daemon() {
@@ -165,8 +173,20 @@ sign_modules() {
     shopt -u nullglob
 }
 
-fetch_openzotac_repo
-OPENZOTAC_RESOLVED_SHA="$(git -C "${OPENZOTAC_REPO_DIR}" rev-parse HEAD)"
+require_vendor_checkout \
+    "${OPENZOTAC_REPO_DIR}" \
+    "OpenZotacZone/ZotacZone-Drivers" \
+    "install_openzone_drivers.sh" \
+    "openzone_manager.sh" \
+    "uninstall_openzone_drivers.sh" \
+    "driver/hid" \
+    "driver/platform"
+require_vendor_checkout \
+    "${ELEKTROCODER_REPO_DIR}" \
+    "ElektroCoder Zotac platform gist" \
+    "zotac-zone-platform.c"
+OPENZOTAC_RESOLVED_SHA="${OPENZOTAC_REV}"
+ELEKTROCODER_RESOLVED_SHA="${ELEKTROCODER_REV}"
 
 install -m 755 \
     "${OPENZOTAC_REPO_DIR}/openzone_manager.sh" \
@@ -201,6 +221,14 @@ EOF
 
 create_openzotac_source_bundle "${OPENZOTAC_RESOLVED_SHA}"
 
+cat > "${DOC_OUT}/elektrocoder-source-info.txt" <<EOF
+ElektroCoder repository: ${ELEKTROCODER_REPO_URL}
+ElektroCoder commit: ${ELEKTROCODER_RESOLVED_SHA}
+Redistributed source:
+- /usr/lib/zotac-zone-fan/zotac-zone-platform.ko
+- source built from vendor/ElektroCoder-zotac-zone-platform/zotac-zone-platform.c
+EOF
+
 rm -rf "${OPENZONE_BUILD_DIR}"
 mkdir -p "${OPENZONE_BUILD_DIR}"
 cp -a "${OPENZOTAC_REPO_DIR}/driver/hid/." "${OPENZONE_BUILD_DIR}/"
@@ -217,8 +245,9 @@ sign_modules "${OPENZONE_LIB_OUT}"
 mkdir -p "${EC_BUILD_DIR}"
 cd "${EC_BUILD_DIR}"
 
-wget -q -O zotac-zone-platform.c \
-    "${ELEKTROCODER_RAW}/zotac-zone-platform.c"
+install -m 644 \
+    "${ELEKTROCODER_REPO_DIR}/zotac-zone-platform.c" \
+    zotac-zone-platform.c
 
 cat > Makefile << 'EOF'
 obj-m += zotac-zone-platform.o
@@ -239,7 +268,6 @@ if [[ -n "${SECUREBOOT_CERT_PATH}" && -s "${SECUREBOOT_CERT_PATH}" ]]; then
         -out "${SECUREBOOT_OUT}/zotac-zone-mok.der"
 fi
 
-COOLERCONTROL_VERSION="4.0.1"
 CC_DOWNLOAD_URL="https://gitlab.com/coolercontrol/coolercontrol/-/releases/${COOLERCONTROL_VERSION}/downloads/packages/CoolerControlD-x86_64.AppImage"
 
 curl -fL -o "${CC_DIR}/CoolerControlD-x86_64.AppImage" "${CC_DOWNLOAD_URL}"
@@ -247,7 +275,6 @@ chmod +x "${CC_DIR}/CoolerControlD-x86_64.AppImage"
 
 dnf5 clean all
 rm -rf \
-    "${OPENZOTAC_REPO_DIR}" \
     "${OPENZONE_BUILD_DIR}" \
     "${EC_BUILD_DIR}" \
     "${OPENZOTAC_SOURCE_BUNDLE_DIR}" \

@@ -4,6 +4,27 @@ This file documents the current local and CI build flow for this repository.
 Use placeholder values such as `<repo-owner>`, `<repo-name>`, and `<image-name>`
 when adapting commands to another fork.
 
+## Managed Upstream Inputs
+
+The image now treats the Zotac-specific upstream sources as pinned repository
+inputs instead of resolving them dynamically during the workflow:
+
+- `vendor/OpenZotacZone`: `OpenZotacZone/ZotacZone-Drivers` git submodule
+- `vendor/ElektroCoder-zotac-zone-platform`: ElektroCoder gist git submodule
+- `build_files/dependencies.env`: version pins such as `COOLERCONTROL_VERSION`
+
+Initialize the vendored sources after cloning:
+
+```bash
+git submodule update --init --recursive
+```
+
+Update behavior:
+
+- Dependabot can update `.gitmodules` targets through the `gitsubmodule` ecosystem.
+- Renovate can update the same submodules and regex-managed version pins such as `COOLERCONTROL_VERSION`.
+- Rebuilds now happen from dependency PRs or direct repo changes, rather than from a scheduled remote source probe.
+
 ## What The Repo Builds
 
 - A bootc container image from `Containerfile`
@@ -44,7 +65,6 @@ To mirror CI more closely, you can also pass the optional build arguments:
 
 ```bash
 podman build \
-  --build-arg OPENZOTAC_SHA=<upstream-commit-sha> \
   --build-arg SECUREBOOT_MOK_KEY_B64="$(base64 -w0 < secureboot/MOK.priv)" \
   --build-arg SECUREBOOT_MOK_CERT_B64="$(base64 -w0 < secureboot/MOK.pem)" \
   -t localhost/bazzite_zone:latest .
@@ -52,7 +72,7 @@ podman build \
 
 Notes:
 
-- `OPENZOTAC_SHA` pins the exact upstream `OpenZotacZone/ZotacZone-Drivers` commit used for the build.
+- The exact `OpenZotacZone` and `ElektroCoder` source revisions come from the checked-out git submodules under `vendor/`.
 - Omit the Secure Boot arguments if you do not want locally built modules to be signed.
 
 ## Local Disk Image Build
@@ -99,12 +119,12 @@ Adjust the image reference if you want to build from a remote registry image ins
 
 `build.yml`:
 
-- builds the container image on pushes to `main`, pull requests, schedule, and manual dispatch
-- performs a precheck on scheduled runs and skips the image build if the effective source inputs have not changed
+- builds the container image on pushes to `main`, pull requests, and manual dispatch
+- consumes dependency revisions from checked-in submodules and version files
 - pushes to `ghcr.io/<repo-owner>` only on non-PR builds of the default branch
 - signs the pushed container image with Cosign on non-PR builds of the default branch
 - signs the out-of-tree kernel modules for Secure Boot on non-PR builds of the default branch when signing secrets are configured
-- records build metadata labels such as the upstream OpenZotac commit, base-image digest, and source fingerprint on the published image
+- records build metadata labels such as the upstream OpenZotac commit, ElektroCoder commit, and CoolerControl download URL on the published image
 
 `build-disk.yml`:
 

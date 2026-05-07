@@ -110,10 +110,18 @@ Once enrolled, future images signed with the same keypair will load without disa
 
 `bazzite-zone` now consumes the upstream `OpenZotacZone/ZotacZone-Drivers` repository as a build input instead of keeping a local copy of the dial daemon logic. The artifact stage:
 
-- checks out the upstream repository at the exact commit selected by CI,
+- consumes the exact upstream revisions pinned in `vendor/` submodules,
 - builds the OpenZotacZone kernel modules from that checkout,
 - installs the upstream `openzone_manager.sh`, `uninstall_openzone_drivers.sh`, and extracted `zotac_dial_daemon.py`,
 - keeps Bazzite-specific glue local only for image concerns such as Secure Boot enrollment, module signing, and systemd placement.
+
+The dependency management model is now:
+
+- `vendor/OpenZotacZone`: pinned git submodule for `OpenZotacZone/ZotacZone-Drivers`
+- `vendor/ElektroCoder-zotac-zone-platform`: pinned git submodule for the external EC driver source
+- `build_files/dependencies.env`: regex-managed version pins such as `COOLERCONTROL_VERSION`
+
+That lets Dependabot and Renovate open normal PRs when upstream inputs change, and the image rebuilds only when one of those tracked inputs actually changes.
 
 To preserve upstream script compatibility while avoiding mutable `/etc` drift on an image-based system, the image keeps the upstream tools at:
 
@@ -153,7 +161,13 @@ notice.
 
 No custom GitHub Actions repository variables are required at the moment. The workflows rely on repository secrets and the built-in `GITHUB_TOKEN`.
 
-The container-image workflow resolves the current `OpenZotacZone/ZotacZone-Drivers` `main` commit in its precheck step and passes that exact SHA into the image build. That keeps the CI metadata, source fingerprint, and actual built OpenZotacZone content aligned.
+Initialize the vendored dependencies after cloning:
+
+```bash
+git submodule update --init --recursive
+```
+
+The container-image workflow now reads dependency revisions directly from the checked-out repository state. Submodule update PRs from Dependabot or Renovate become the clean trigger for rebuilding the image.
 
 Required secrets for normal image publishing:
 

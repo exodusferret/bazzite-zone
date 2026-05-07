@@ -93,6 +93,12 @@ build $target_image=image_name $tag=default_tag:
     if [[ -z "$(git status -s)" ]]; then
         BUILD_ARGS+=("--build-arg" "SHA_HEAD_SHORT=$(git rev-parse --short HEAD)")
     fi
+    if [[ -d vendor/OpenZotacZone ]]; then
+        BUILD_ARGS+=("--build-arg" "OPENZOTAC_REV=$(git -C vendor/OpenZotacZone rev-parse HEAD)")
+    fi
+    if [[ -d vendor/ElektroCoder-zotac-zone-platform ]]; then
+        BUILD_ARGS+=("--build-arg" "ELEKTROCODER_REV=$(git -C vendor/ElektroCoder-zotac-zone-platform rev-parse HEAD)")
+    fi
 
     podman build \
         "${BUILD_ARGS[@]}" \

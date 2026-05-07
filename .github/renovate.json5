@@ -4,7 +4,21 @@
     "config:best-practices",
   ],
 
+  "git-submodules": {
+    "enabled": true,
+  },
+
   "rebaseWhen": "never",
+
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^build_files\\/dependencies\\.env$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s+COOLERCONTROL_VERSION=\"(?<currentValue>[^\"]+)\"",
+      ],
+    },
+  ],
 
   "packageRules": [
     {
