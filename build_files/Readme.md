@@ -40,6 +40,21 @@ This builds the same `Containerfile` used by CI, including:
 - Secure Boot module signing when signing inputs are provided
 - image configuration from `build_files/configure-image.sh`
 
+To mirror CI more closely, you can also pass the optional build arguments:
+
+```bash
+podman build \
+  --build-arg OPENZOTAC_SHA=<upstream-commit-sha> \
+  --build-arg SECUREBOOT_MOK_KEY_B64="$(base64 -w0 < secureboot/MOK.priv)" \
+  --build-arg SECUREBOOT_MOK_CERT_B64="$(base64 -w0 < secureboot/MOK.pem)" \
+  -t localhost/bazzite_zone:latest .
+```
+
+Notes:
+
+- `OPENZOTAC_SHA` pins the exact upstream `OpenZotacZone/ZotacZone-Drivers` commit used for the build.
+- Omit the Secure Boot arguments if you do not want locally built modules to be signed.
+
 ## Local Disk Image Build
 
 The repository CI uses `osbuild/bootc-image-builder-action` to generate disk images.
@@ -85,20 +100,23 @@ Adjust the image reference if you want to build from a remote registry image ins
 `build.yml`:
 
 - builds the container image on pushes to `main`, pull requests, schedule, and manual dispatch
+- performs a precheck on scheduled runs and skips the image build if the effective source inputs have not changed
 - pushes to `ghcr.io/<repo-owner>` only on non-PR builds of the default branch
-- signs the pushed container image with Cosign on release builds
-- signs the out-of-tree kernel modules for Secure Boot on release builds
+- signs the pushed container image with Cosign on non-PR builds of the default branch
+- signs the out-of-tree kernel modules for Secure Boot on non-PR builds of the default branch when signing secrets are configured
+- records build metadata labels such as the upstream OpenZotac commit, base-image digest, and source fingerprint on the published image
 
 `build-disk.yml`:
 
 - can be run manually
 - also runs automatically after a successful container-image workflow
+- also runs on pull requests that change `disk_config/*` or `.github/workflows/build-disk.yml`
 - produces `qcow2` and `anaconda-iso`
 - can upload artifacts either to GitHub Actions artifacts or to S3-compatible storage
 
 ## Required Repository Secrets
 
-For release builds in `build.yml`:
+For non-PR builds of the default branch in `build.yml`:
 
 - `SIGNING_SECRET`
 - `COSIGN_PASSWORD`
