@@ -20,7 +20,7 @@ The authors and contributors accept no liability for hardware damage, data loss,
 
 ## Features
 
-- Integrated OpenZotacZone drivers, baked into the image and automatically loaded on boot.
+- Integrated OpenZotacZone drivers and userspace tools, baked into the image from the upstream repository and automatically loaded on boot.
 - Release builds sign the out-of-tree kernel modules for Secure Boot and ship the public MOK certificate for enrollment.
 - Zotac Zone–specific functionality:
   - Fully functional back buttons (P4/P3-like).
@@ -106,9 +106,54 @@ After the import is staged, reboot and complete the enrollment in the blue MOK M
 
 Once enrolled, future images signed with the same keypair will load without disabling Secure Boot.
 
+## OpenZotacZone Integration
+
+`bazzite-zone` now consumes the upstream `OpenZotacZone/ZotacZone-Drivers` repository as a build input instead of keeping a local copy of the dial daemon logic. The artifact stage:
+
+- checks out the upstream repository at the exact commit selected by CI,
+- builds the OpenZotacZone kernel modules from that checkout,
+- installs the upstream `openzone_manager.sh`, `uninstall_openzone_drivers.sh`, and extracted `zotac_dial_daemon.py`,
+- keeps Bazzite-specific glue local only for image concerns such as Secure Boot enrollment, module signing, and systemd placement.
+
+To preserve upstream script compatibility while avoiding mutable `/etc` drift on an image-based system, the image keeps the upstream tools at:
+
+- `/usr/local/bin/openzone_manager.sh`
+- `/usr/local/bin/uninstall_openzone_drivers.sh`
+- `/usr/local/bin/zotac_dial_daemon.py`
+
+and installs the managed services under:
+
+- `/usr/lib/systemd/system/zotac-zone-drivers.service`
+- `/usr/lib/systemd/system/zotac-dials.service`
+
+## Licensing
+
+This repository's original project files are licensed under Apache-2.0. That
+does not change the license of third-party software redistributed in the built
+image.
+
+The built image redistributes GPL-3.0-covered components from
+`OpenZotacZone/ZotacZone-Drivers`, including:
+
+- `openzone_manager.sh`
+- `uninstall_openzone_drivers.sh`
+- `zotac_dial_daemon.py`
+- OpenZotacZone kernel modules built from upstream source
+
+To keep that redistribution compliant, the image also ships:
+
+- the upstream GPL-3.0 license at `/usr/share/licenses/bazzite-zone/OpenZotacZone-GPL-3.0.txt`
+- source metadata at `/usr/share/doc/bazzite-zone/openzotaczone-source-info.txt`
+- a corresponding source bundle at `/usr/share/doc/bazzite-zone/openzotaczone-corresponding-source.tar.gz`
+
+See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for the project-level
+notice.
+
 ## GitHub Actions Configuration
 
 No custom GitHub Actions repository variables are required at the moment. The workflows rely on repository secrets and the built-in `GITHUB_TOKEN`.
+
+The container-image workflow resolves the current `OpenZotacZone/ZotacZone-Drivers` `main` commit in its precheck step and passes that exact SHA into the image build. That keeps the CI metadata, source fingerprint, and actual built OpenZotacZone content aligned.
 
 Required secrets for normal image publishing:
 

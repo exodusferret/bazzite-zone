@@ -5,9 +5,10 @@ echo "=== Configure Zotac Zone Image ==="
 
 KERNEL_VERSION=$(ls /usr/lib/modules/ | grep -v 'debug' | sort -V | tail -n 1)
 EC_INSTALL_DIR="/usr/lib/zotac-zone-fan"
-DIAL_SCRIPT="/usr/bin/zotac_dial_daemon.py"
+DIAL_SCRIPT="/usr/local/bin/zotac_dial_daemon.py"
+OPENZONE_MANAGER_SCRIPT="/usr/local/bin/openzone_manager.sh"
+OPENZONE_UNINSTALL_SCRIPT="/usr/local/bin/uninstall_openzone_drivers.sh"
 CC_DIR="/var/opt/coolercontrol"
-STEAM_MONITOR_STATE_DIR="/run/zotac-zone-monitor"
 SECUREBOOT_CERT="/usr/share/secureboot/zotac-zone-mok.der"
 SECUREBOOT_COMPAT_CERT_DIR="/etc/pki/akmods/certs"
 SECUREBOOT_COMPAT_CERT="${SECUREBOOT_COMPAT_CERT_DIR}/akmods-zotac-zone.der"
@@ -44,50 +45,6 @@ fi
 EOF
 chmod 700 /usr/bin/zotac-load-drivers
 
-cat > /usr/bin/zotac-recover-input << EOF
-#!/usr/bin/env bash
-set -euo pipefail
-
-log() {
-    echo "[zotac-recover-input] \$*"
-}
-
-log "Reloading Zotac input stack"
-
-/usr/sbin/modprobe uinput || true
-/usr/bin/systemctl restart zotac-zone-drivers.service
-/usr/bin/udevadm control --reload-rules || true
-/usr/bin/udevadm trigger --subsystem-match=hidraw || true
-/usr/bin/systemctl restart zotac-dials.service
-EOF
-chmod 700 /usr/bin/zotac-recover-input
-
-cat > /usr/bin/zotac-monitor-steam-exit << EOF
-#!/usr/bin/env bash
-set -euo pipefail
-
-STATE_DIR="${STEAM_MONITOR_STATE_DIR}"
-STATE_FILE="\${STATE_DIR}/steam-active"
-
-steam_running() {
-    /usr/bin/pgrep -x steam >/dev/null 2>&1 \
-        || /usr/bin/pgrep -f '/steam(|-webhelper|deckui)' >/dev/null 2>&1
-}
-
-mkdir -p "\${STATE_DIR}"
-
-if steam_running; then
-    : > "\${STATE_FILE}"
-    exit 0
-fi
-
-if [[ -f "\${STATE_FILE}" ]]; then
-    rm -f "\${STATE_FILE}"
-    /usr/bin/zotac-recover-input
-fi
-EOF
-chmod 700 /usr/bin/zotac-monitor-steam-exit
-
 cat > /usr/lib/systemd/system/zotac-zone-drivers.service << EOF
 [Unit]
 Description=Zotac Zone HID & Platform Drivers (OpenZONE)
@@ -102,124 +59,22 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 EOF
 
-cat > /usr/lib/systemd/system/zotac-steam-exit-monitor.service << EOF
-[Unit]
-Description=Recover Zotac input stack when Steam exits
-After=multi-user.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/zotac-monitor-steam-exit
-EOF
-
-cat > /usr/lib/systemd/system/zotac-steam-exit-monitor.timer << EOF
-[Unit]
-Description=Poll for Steam exit to recover Zotac input stack
-
-[Timer]
-OnBootSec=30s
-OnUnitActiveSec=10s
-Unit=zotac-steam-exit-monitor.service
-
-[Install]
-WantedBy=timers.target
-EOF
-
 cat > /usr/lib/udev/rules.d/99-zotac-zone.rules << 'EOF'
 KERNEL=="hidraw*", ATTRS{idVendor}=="1ee9", ATTRS{idProduct}=="1590", MODE="0666"
 EOF
 
 echo "uinput" > /usr/lib/modules-load.d/zotac-uinput.conf
 
-cat > "${DIAL_SCRIPT}" << 'PYEOF'
-#!/usr/bin/env python3
-# Zotac Zone Dial Daemon (OpenZONE - Raw HID)
-import os, sys, glob, time, argparse
-from evdev import UInput, ecodes as e
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--left",  default="volume")
-parser.add_argument("--right", default="brightness")
-args = parser.parse_args()
-
-VID = "1EE9"
-PID = "1590"
-
-ACTIONS = {
-    "volume":            {"type": "key",       "up": e.KEY_VOLUMEUP,    "down": e.KEY_VOLUMEDOWN},
-    "brightness":        {"type": "backlight", "step": 5},
-    "scroll":            {"type": "rel",       "axis": e.REL_WHEEL,     "up": 1,  "down": -1},
-    "scroll_inverted":   {"type": "rel",       "axis": e.REL_WHEEL,     "up": -1, "down": 1},
-    "arrows_vertical":   {"type": "key",       "up": e.KEY_UP,          "down": e.KEY_DOWN},
-    "arrows_horizontal": {"type": "key",       "up": e.KEY_RIGHT,       "down": e.KEY_LEFT},
-    "media":             {"type": "key",       "up": e.KEY_NEXTSONG,    "down": e.KEY_PREVIOUSSONG},
-    "page_scroll":       {"type": "key",       "up": e.KEY_PAGEUP,      "down": e.KEY_PAGEDOWN},
-    "zoom":              {"type": "key",       "up": e.KEY_ZOOMIN,      "down": e.KEY_ZOOMOUT},
-}
-
-def find_backlight():
-    paths = glob.glob("/sys/class/backlight/*")
-    if not paths: return None
-    paths.sort(key=lambda x: "amdgpu" not in x)
-    return paths[0]
-
-def set_backlight(path, direction, step_pct):
-    try:
-        max_v = int(open(os.path.join(path, "max_brightness")).read())
-        cur_v = int(open(os.path.join(path, "brightness")).read())
-        step  = max(1, int(max_v * (step_pct / 100.0)))
-        new_v = max(0, min(cur_v + (step if direction == "up" else -step), max_v))
-        open(os.path.join(path, "brightness"), "w").write(str(new_v))
-    except Exception as ex:
-        print(f"Backlight Err: {ex}")
-
-def find_hidraw():
-    for p in glob.glob("/sys/class/hidraw/hidraw*"):
-        try:
-            c = open(os.path.join(p, "device/uevent")).read().upper()
-            if f"HID_ID={VID}:{PID}" in c or f"PRODUCT={VID}/{PID}" in c:
-                return f"/dev/{os.path.basename(p)}"
-        except: continue
-    return None
-
-def main():
-    print(f"Dial Daemon. Links:{args.left} | Rechts:{args.right}")
-    backlight = find_backlight()
-    cap = {e.EV_KEY: [], e.EV_REL: [e.REL_WHEEL]}
-    for a in ACTIONS.values():
-        if a["type"] == "key": cap[e.EV_KEY].extend([a["up"], a["down"]])
-        elif a["type"] == "rel": cap[e.EV_REL].append(a["axis"])
-    ui = UInput(cap, name="Zotac Zone Virtual Dials")
-    while True:
-        dev_path = find_hidraw()
-        if not dev_path:
-            time.sleep(3); continue
-        try:
-            with open(dev_path, "rb") as f:
-                while True:
-                    data = f.read(64)
-                    if not data or len(data) < 4: break
-                    if data[0] != 0x03 or data[3] == 0x00: continue
-                    trig = data[3]
-                    ac, di = None, None
-                    if   trig == 0x10: ac, di = ACTIONS.get(args.left),  "down"
-                    elif trig == 0x08: ac, di = ACTIONS.get(args.left),  "up"
-                    elif trig == 0x02: ac, di = ACTIONS.get(args.right), "down"
-                    elif trig == 0x01: ac, di = ACTIONS.get(args.right), "up"
-                    if not ac: continue
-                    if   ac["type"] == "backlight" and backlight:
-                        set_backlight(backlight, di, ac["step"])
-                    elif ac["type"] == "key":
-                        ui.write(e.EV_KEY, ac[di], 1); ui.write(e.EV_KEY, ac[di], 0); ui.syn()
-                    elif ac["type"] == "rel":
-                        ui.write(e.EV_REL, ac["axis"], ac[di]); ui.syn()
-        except OSError: time.sleep(2)
-        except Exception as err: print(f"Err:{err}"); time.sleep(2)
-
-if __name__ == "__main__":
-    main()
-PYEOF
-chmod +x "${DIAL_SCRIPT}"
+for required_script in \
+    "${DIAL_SCRIPT}" \
+    "${OPENZONE_MANAGER_SCRIPT}" \
+    "${OPENZONE_UNINSTALL_SCRIPT}"
+do
+    if [[ ! -x "${required_script}" ]]; then
+        echo "Missing expected upstream OpenZotacZone artifact: ${required_script}"
+        exit 1
+    fi
+done
 
 cat > /usr/lib/systemd/system/zotac-dials.service << EOF
 [Unit]
@@ -363,7 +218,6 @@ EOF
 
 systemctl enable zotac-zone-drivers.service
 systemctl enable zotac-dials.service
-systemctl enable zotac-steam-exit-monitor.timer
 systemctl enable coolercontrold.service
 systemctl enable zotac-fan.service
 

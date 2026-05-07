@@ -3,17 +3,24 @@ set -ouex pipefail
 
 echo "=== Build Zotac Zone Artifacts ==="
 
-OPENZONE_RAW="https://raw.githubusercontent.com/OpenZotacZone/ZotacZone-Drivers/refs/heads/main"
+OPENZOTAC_REPO_URL="https://github.com/OpenZotacZone/ZotacZone-Drivers.git"
+OPENZOTAC_SHA="${OPENZOTAC_SHA:-}"
 ELEKTROCODER_RAW="https://gist.githubusercontent.com/ElektroCoder/c3ddfbe6dff057ab16375ab965876e74/raw/a7bdf061ca0613ef243e1e9851b70e886face4ea"
 
 KERNEL_VERSION=$(ls /usr/lib/modules/ | grep -v 'debug' | sort -V | tail -n 1)
 ARTIFACT_ROOT="/artifacts"
+OPENZOTAC_REPO_DIR="/tmp/OpenZotacZone"
 OPENZONE_BUILD_DIR="/tmp/zotac_zone_build"
 EC_BUILD_DIR="/tmp/zotac_ec_fan_build"
+OPENZOTAC_SOURCE_BUNDLE_DIR="/tmp/openzotaczone-corresponding-source"
 OPENZONE_OUT="${ARTIFACT_ROOT}/usr/lib/modules/${KERNEL_VERSION}/extra/zotac-zone"
+OPENZONE_BIN_OUT="${ARTIFACT_ROOT}/usr/local/bin"
+OPENZONE_LIB_OUT="${ARTIFACT_ROOT}/usr/local/lib/zotac-zone"
 EC_OUT="${ARTIFACT_ROOT}/usr/lib/zotac-zone-fan"
 CC_DIR="${ARTIFACT_ROOT}/var/opt/coolercontrol"
 SECUREBOOT_OUT="${ARTIFACT_ROOT}/usr/share/secureboot"
+LICENSES_OUT="${ARTIFACT_ROOT}/usr/share/licenses/bazzite-zone"
+DOC_OUT="${ARTIFACT_ROOT}/usr/share/doc/bazzite-zone"
 SECUREBOOT_TMP_DIR="/tmp/secureboot"
 SECUREBOOT_KEY_PATH="${SECUREBOOT_TMP_DIR}/MOK.priv"
 SECUREBOOT_CERT_PATH="${SECUREBOOT_TMP_DIR}/MOK.pem"
@@ -21,7 +28,16 @@ SECUREBOOT_MOK_KEY_B64="${SECUREBOOT_MOK_KEY_B64:-}"
 SECUREBOOT_MOK_CERT_B64="${SECUREBOOT_MOK_CERT_B64:-}"
 SIGN_FILE="/usr/lib/modules/${KERNEL_VERSION}/build/scripts/sign-file"
 
-mkdir -p "${OPENZONE_OUT}" "${EC_OUT}" "${CC_DIR}" "${SECUREBOOT_OUT}" "${SECUREBOOT_TMP_DIR}"
+mkdir -p \
+    "${OPENZONE_OUT}" \
+    "${OPENZONE_BIN_OUT}" \
+    "${OPENZONE_LIB_OUT}" \
+    "${EC_OUT}" \
+    "${CC_DIR}" \
+    "${SECUREBOOT_OUT}" \
+    "${LICENSES_OUT}" \
+    "${DOC_OUT}" \
+    "${SECUREBOOT_TMP_DIR}"
 
 dnf5 -y install --setopt=install_weak_deps=False \
     kernel-devel-${KERNEL_VERSION} \
@@ -35,6 +51,98 @@ if [[ -n "${SECUREBOOT_MOK_KEY_B64}" && -n "${SECUREBOOT_MOK_CERT_B64}" ]]; then
     printf '%s' "${SECUREBOOT_MOK_KEY_B64}" | base64 -d > "${SECUREBOOT_KEY_PATH}"
     printf '%s' "${SECUREBOOT_MOK_CERT_B64}" | base64 -d > "${SECUREBOOT_CERT_PATH}"
 fi
+
+fetch_openzotac_repo() {
+    rm -rf "${OPENZOTAC_REPO_DIR}"
+    git init "${OPENZOTAC_REPO_DIR}"
+    git -C "${OPENZOTAC_REPO_DIR}" remote add origin "${OPENZOTAC_REPO_URL}"
+
+    if [[ -n "${OPENZOTAC_SHA}" ]]; then
+        git -C "${OPENZOTAC_REPO_DIR}" fetch --depth 1 origin "${OPENZOTAC_SHA}"
+    else
+        git -C "${OPENZOTAC_REPO_DIR}" fetch --depth 1 origin main
+    fi
+
+    git -C "${OPENZOTAC_REPO_DIR}" checkout --detach FETCH_HEAD
+    git -C "${OPENZOTAC_REPO_DIR}" rev-parse HEAD
+}
+
+extract_upstream_dial_daemon() {
+    local installer_script="$1"
+    local output_path="$2"
+
+    awk '
+        index($0, "cat << '\''EOF'\'' > \"$DIAL_INSTALL_DIR/$DIAL_SCRIPT_NAME\"") {
+            capture = 1
+            next
+        }
+        capture && /^EOF$/ {
+            exit
+        }
+        capture {
+            print
+        }
+    ' "${installer_script}" > "${output_path}"
+
+    if [[ ! -s "${output_path}" ]]; then
+        echo "Failed to extract zotac_dial_daemon.py from upstream installer."
+        exit 1
+    fi
+
+    chmod 755 "${output_path}"
+}
+
+patch_openzotac_scripts() {
+    local manager_script="$1"
+    local uninstall_script="$2"
+
+    sed -i \
+        's|^DIAL_SERVICE_PATH=.*$|DIAL_SERVICE_PATH="/usr/lib/systemd/system/$DIAL_SERVICE_NAME"|' \
+        "${manager_script}"
+
+    sed -i \
+        -e 's|/etc/systemd/system/zotac-dials.service|/usr/lib/systemd/system/zotac-dials.service|g' \
+        -e 's|/etc/systemd/system/zotac-zone-drivers.service|/usr/lib/systemd/system/zotac-zone-drivers.service|g' \
+        "${uninstall_script}"
+}
+
+create_openzotac_source_bundle() {
+    local resolved_sha="$1"
+
+    rm -rf "${OPENZOTAC_SOURCE_BUNDLE_DIR}"
+    mkdir -p "${OPENZOTAC_SOURCE_BUNDLE_DIR}"
+
+    tar \
+        --exclude='.git' \
+        -C "${OPENZOTAC_REPO_DIR}" \
+        -cf - \
+        . \
+        | tar -C "${OPENZOTAC_SOURCE_BUNDLE_DIR}" -xf -
+
+    cp "${OPENZONE_BIN_OUT}/openzone_manager.sh" \
+        "${OPENZOTAC_SOURCE_BUNDLE_DIR}/openzone_manager.sh"
+    cp "${OPENZONE_BIN_OUT}/uninstall_openzone_drivers.sh" \
+        "${OPENZOTAC_SOURCE_BUNDLE_DIR}/uninstall_openzone_drivers.sh"
+    cp "${OPENZONE_BIN_OUT}/zotac_dial_daemon.py" \
+        "${OPENZOTAC_SOURCE_BUNDLE_DIR}/zotac_dial_daemon.py"
+
+    cat > "${OPENZOTAC_SOURCE_BUNDLE_DIR}/BUILD-PATCHES.md" <<EOF
+# OpenZotacZone Corresponding Source
+
+This bundle corresponds to the OpenZotacZone GPL components redistributed by
+bazzite-zone.
+
+- Upstream repository: ${OPENZOTAC_REPO_URL}
+- Upstream commit: ${resolved_sha}
+- Local packaging changes:
+  - \`openzone_manager.sh\`: \`DIAL_SERVICE_PATH\` adjusted to use \`/usr/lib/systemd/system\`
+  - \`uninstall_openzone_drivers.sh\`: service removal paths adjusted to use \`/usr/lib/systemd/system\`
+  - \`zotac_dial_daemon.py\`: extracted from \`install_openzone_drivers.sh\` and installed as a standalone script
+EOF
+
+    tar -C /tmp -czf "${DOC_OUT}/openzotaczone-corresponding-source.tar.gz" \
+        "$(basename "${OPENZOTAC_SOURCE_BUNDLE_DIR}")"
+}
 
 sign_modules() {
     local module_dir="$1"
@@ -50,46 +158,61 @@ sign_modules() {
         exit 1
     fi
 
+    shopt -s nullglob
     for module in "${module_dir}"/*.ko; do
         "${SIGN_FILE}" sha256 "${SECUREBOOT_KEY_PATH}" "${SECUREBOOT_CERT_PATH}" "${module}"
     done
+    shopt -u nullglob
 }
 
-mkdir -p "${OPENZONE_BUILD_DIR}"
-cd "${OPENZONE_BUILD_DIR}"
+fetch_openzotac_repo
+OPENZOTAC_RESOLVED_SHA="$(git -C "${OPENZOTAC_REPO_DIR}" rev-parse HEAD)"
 
-for f in \
-    "zotac-zone-hid-core.c" \
-    "zotac-zone-hid-rgb.c" \
-    "zotac-zone-hid-input.c" \
-    "zotac-zone-hid-config.c" \
-    "zotac-zone.h"
-do
-    wget -q "${OPENZONE_RAW}/driver/hid/${f}"
-done
+install -m 755 \
+    "${OPENZOTAC_REPO_DIR}/openzone_manager.sh" \
+    "${OPENZONE_BIN_OUT}/openzone_manager.sh"
+install -m 755 \
+    "${OPENZOTAC_REPO_DIR}/uninstall_openzone_drivers.sh" \
+    "${OPENZONE_BIN_OUT}/uninstall_openzone_drivers.sh"
+extract_upstream_dial_daemon \
+    "${OPENZOTAC_REPO_DIR}/install_openzone_drivers.sh" \
+    "${OPENZONE_BIN_OUT}/zotac_dial_daemon.py"
+patch_openzotac_scripts \
+    "${OPENZONE_BIN_OUT}/openzone_manager.sh" \
+    "${OPENZONE_BIN_OUT}/uninstall_openzone_drivers.sh"
 
-for f in \
-    "zotac-zone-platform.c" \
-    "firmware_attributes_class.h" \
-    "firmware_attributes_class.c"
-do
-    wget -q "${OPENZONE_RAW}/driver/platform/${f}"
-done
+install -m 644 \
+    "${OPENZOTAC_REPO_DIR}/LICENSE" \
+    "${LICENSES_OUT}/OpenZotacZone-GPL-3.0.txt"
 
-cat > Makefile << 'EOF'
-obj-m += zotac-zone-hid.o
-zotac-zone-hid-y := zotac-zone-hid-core.o zotac-zone-hid-rgb.o zotac-zone-hid-input.o zotac-zone-hid-config.o
-obj-m += firmware_attributes_class.o
-obj-m += zotac-zone-platform.o
-all:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
-clean:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
+cat > "${DOC_OUT}/openzotaczone-source-info.txt" <<EOF
+OpenZotacZone repository: ${OPENZOTAC_REPO_URL}
+OpenZotacZone commit: ${OPENZOTAC_RESOLVED_SHA}
+Redistributed GPL components:
+- /usr/local/bin/openzone_manager.sh
+- /usr/local/bin/uninstall_openzone_drivers.sh
+- /usr/local/bin/zotac_dial_daemon.py
+- /usr/local/lib/zotac-zone/*.ko
+- /usr/lib/modules/${KERNEL_VERSION}/extra/zotac-zone/*.ko
+
+The corresponding source for these components is shipped at:
+/usr/share/doc/bazzite-zone/openzotaczone-corresponding-source.tar.gz
 EOF
+
+create_openzotac_source_bundle "${OPENZOTAC_RESOLVED_SHA}"
+
+rm -rf "${OPENZONE_BUILD_DIR}"
+mkdir -p "${OPENZONE_BUILD_DIR}"
+cp -a "${OPENZOTAC_REPO_DIR}/driver/hid/." "${OPENZONE_BUILD_DIR}/"
+cp -a "${OPENZOTAC_REPO_DIR}/driver/platform/." "${OPENZONE_BUILD_DIR}/"
+
+cd "${OPENZONE_BUILD_DIR}"
 
 make -C /usr/lib/modules/${KERNEL_VERSION}/build M="$(pwd)" modules
 cp *.ko "${OPENZONE_OUT}/"
+cp *.ko "${OPENZONE_LIB_OUT}/"
 sign_modules "${OPENZONE_OUT}"
+sign_modules "${OPENZONE_LIB_OUT}"
 
 mkdir -p "${EC_BUILD_DIR}"
 cd "${EC_BUILD_DIR}"
@@ -123,4 +246,9 @@ curl -fL -o "${CC_DIR}/CoolerControlD-x86_64.AppImage" "${CC_DOWNLOAD_URL}"
 chmod +x "${CC_DIR}/CoolerControlD-x86_64.AppImage"
 
 dnf5 clean all
-rm -rf "${OPENZONE_BUILD_DIR}" "${EC_BUILD_DIR}" "${SECUREBOOT_TMP_DIR}"
+rm -rf \
+    "${OPENZOTAC_REPO_DIR}" \
+    "${OPENZONE_BUILD_DIR}" \
+    "${EC_BUILD_DIR}" \
+    "${OPENZOTAC_SOURCE_BUNDLE_DIR}" \
+    "${SECUREBOOT_TMP_DIR}"

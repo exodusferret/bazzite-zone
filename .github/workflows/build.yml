@@ -120,17 +120,12 @@ jobs:
               | jq -r --arg label_name "${label_name}" '.config.Labels[$label_name] // empty'
           }
 
+          FORCE_BUILD=false
           if [[ "${GITHUB_EVENT_NAME}" != "schedule" ]]; then
-            echo "should_build=true" >> "${GITHUB_OUTPUT}"
-            echo "base_image_digest=" >> "${GITHUB_OUTPUT}"
-            echo "openzotac_sha=" >> "${GITHUB_OUTPUT}"
-            echo "elektrocoder_sha256=" >> "${GITHUB_OUTPUT}"
-            echo "coolercontrol_url=" >> "${GITHUB_OUTPUT}"
-            echo "source_fingerprint=" >> "${GITHUB_OUTPUT}"
-            exit 0
+            FORCE_BUILD=true
           fi
 
-          OPENZONE_RAW="$(sed -n 's/^OPENZONE_RAW="\(.*\)"$/\1/p' build_files/build-modules.sh)"
+          OPENZOTAC_REPO_URL="$(sed -n 's/^OPENZOTAC_REPO_URL="\(.*\)"$/\1/p' build_files/build-modules.sh)"
           ELEKTROCODER_RAW="$(sed -n 's/^ELEKTROCODER_RAW="\(.*\)"$/\1/p' build_files/build-modules.sh)"
           COOLERCONTROL_VERSION="$(sed -n 's/^COOLERCONTROL_VERSION="\(.*\)"$/\1/p' build_files/build-modules.sh)"
           COOLERCONTROL_URL="https://gitlab.com/coolercontrol/coolercontrol/-/releases/${COOLERCONTROL_VERSION}/downloads/packages/CoolerControlD-x86_64.AppImage"
@@ -145,7 +140,7 @@ jobs:
 
           SOURCE_FINGERPRINT="$(printf '%s\n' \
             "repo_sha=${GITHUB_SHA}" \
-            "openzotac_raw=${OPENZONE_RAW}" \
+            "openzotac_repo=${OPENZOTAC_REPO_URL}" \
             "openzotac_sha=${OPENZOTAC_SHA}" \
             "elektrocoder_raw=${ELEKTROCODER_RAW}" \
             "elektrocoder_sha256=${ELEKTROCODER_SHA256}" \
@@ -162,7 +157,10 @@ jobs:
             CURRENT_FINGERPRINT=""
           fi
 
-          if [[ -n "${CURRENT_FINGERPRINT}" && "${CURRENT_FINGERPRINT}" == "${SOURCE_FINGERPRINT}" ]]; then
+          if [[ "${FORCE_BUILD}" == "true" ]]; then
+            echo "Build requested by event type; skipping scheduled fingerprint gate."
+            echo "should_build=true" >> "${GITHUB_OUTPUT}"
+          elif [[ -n "${CURRENT_FINGERPRINT}" && "${CURRENT_FINGERPRINT}" == "${SOURCE_FINGERPRINT}" ]]; then
             echo "No source changes detected for the scheduled build."
             echo "should_build=false" >> "${GITHUB_OUTPUT}"
           else
@@ -296,6 +294,7 @@ jobs:
           build-args: |
             SECUREBOOT_MOK_KEY_B64=${{ env.SECUREBOOT_MOK_KEY_B64 }}
             SECUREBOOT_MOK_CERT_B64=${{ env.SECUREBOOT_MOK_CERT_B64 }}
+            OPENZOTAC_SHA=${{ needs.precheck.outputs.openzotac_sha }}
           labels: |
             ${{ steps.metadata.outputs.labels }}
             ${{ env.CUSTOM_LABELS }}

@@ -7,6 +7,7 @@ FROM ghcr.io/ublue-os/bazzite-deck:stable as artifact-builder
 
 ARG SECUREBOOT_MOK_KEY_B64=""
 ARG SECUREBOOT_MOK_CERT_B64=""
+ARG OPENZOTAC_SHA=""
 
 RUN if grep -Rqs "^\[updates-archive\]" /etc/yum.repos.d; then \
       for f in /etc/yum.repos.d/*.repo; do \
@@ -28,6 +29,7 @@ RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     --mount=type=cache,dst=/var/cache \
     --mount=type=cache,dst=/var/log \
     --mount=type=tmpfs,dst=/tmp \
+    OPENZOTAC_SHA="${OPENZOTAC_SHA}" \
     SECUREBOOT_MOK_KEY_B64="${SECUREBOOT_MOK_KEY_B64}" \
     SECUREBOOT_MOK_CERT_B64="${SECUREBOOT_MOK_CERT_B64}" \
     bash /ctx/build-modules.sh
