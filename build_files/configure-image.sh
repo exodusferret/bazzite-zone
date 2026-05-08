@@ -100,10 +100,19 @@ set -euo pipefail
 
 CERT="${SECUREBOOT_COMPAT_CERT}"
 DEFAULT_PASSWORD="${SECUREBOOT_DEFAULT_PASSWORD}"
+HASH_FILE=""
 
 log() {
     echo "[zotac-secureboot] \$*"
 }
+
+cleanup() {
+    if [[ -n "\${HASH_FILE}" && -f "\${HASH_FILE}" ]]; then
+        rm -f "\${HASH_FILE}"
+    fi
+}
+
+trap cleanup EXIT
 
 cert_fingerprint() {
     openssl x509 -inform DER -in "\$1" -noout -fingerprint | cut -d= -f2
@@ -143,9 +152,18 @@ if mokutil --test-key "\${CERT}" >/dev/null 2>&1 \
 fi
 
 mokutil --timeout -1 || true
-log "The next prompt is for a one-time MOK password."
-log "Use '\${DEFAULT_PASSWORD}' to match the Universal Blue workflow."
-IMPORT_OUTPUT="\$(mokutil --import "\${CERT}" 2>&1)"
+HASH_FILE="\$(mktemp)"
+chmod 600 "\${HASH_FILE}"
+mokutil --generate-hash="\${DEFAULT_PASSWORD}" > "\${HASH_FILE}"
+log "Using the built-in one-time MOK password convention."
+log "Password: '\${DEFAULT_PASSWORD}'"
+
+# Interactive flow kept for reference:
+# log "The next prompt is for a one-time MOK password."
+# log "Use '\${DEFAULT_PASSWORD}' to match the Universal Blue workflow."
+# IMPORT_OUTPUT="\$(mokutil --import "\${CERT}" 2>&1)"
+
+IMPORT_OUTPUT="\$(mokutil --import "\${CERT}" --hash-file "\${HASH_FILE}" 2>&1)"
 printf '%s\n' "\${IMPORT_OUTPUT}"
 
 if mokutil --test-key "\${CERT}" >/dev/null 2>&1 \
