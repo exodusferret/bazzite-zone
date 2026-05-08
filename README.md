@@ -50,12 +50,13 @@ Custom Bazzite / `bootc` image for the Zotac Zone.
   - dial behavior
   - deadzones
   - vibration
+- get a corrected Gamescope HDR display profile installed into
+  `~/.config/gamescope/scripts/zotac.zone.oled.lua` at user login
 - use `zotac-secureboot-enroll` on Secure Boot systems
 
 ## What Is Not In This Repo
 
 - no repo-managed `144 Hz` fix
-- no repo-managed HDR fix
 - no Decky Loader setup
 - no curated Decky plugin set
 - no OpenRGB package integration

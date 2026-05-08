@@ -28,12 +28,15 @@ CC_DIR="${ARTIFACT_ROOT}/var/opt/coolercontrol"
 SECUREBOOT_OUT="${ARTIFACT_ROOT}/usr/share/secureboot"
 LICENSES_OUT="${ARTIFACT_ROOT}/usr/share/licenses/bazzite-zone"
 DOC_OUT="${ARTIFACT_ROOT}/usr/share/doc/bazzite-zone"
+GAMESCOPE_DISPLAY_OUT="${ARTIFACT_ROOT}/usr/share/gamescope/scripts"
 SECUREBOOT_TMP_DIR="/tmp/secureboot"
 SECUREBOOT_KEY_PATH="${SECUREBOOT_TMP_DIR}/MOK.priv"
 SECUREBOOT_CERT_PATH="${SECUREBOOT_TMP_DIR}/MOK.pem"
 SECUREBOOT_MOK_KEY_B64="${SECUREBOOT_MOK_KEY_B64:-}"
 SECUREBOOT_MOK_CERT_B64="${SECUREBOOT_MOK_CERT_B64:-}"
 SIGN_FILE="/usr/lib/modules/${KERNEL_VERSION}/build/scripts/sign-file"
+HDR_LUA_URL="https://github.com/ValveSoftware/gamescope/raw/513c8dd65f86e884940b3164c270a20d5b59af4c/scripts/00-gamescope/displays/zotac.zone.oled.lua"
+HDR_LUA_NAME="zotac.zone.oled.lua"
 
 mkdir -p \
     "${OPENZONE_OUT}" \
@@ -44,6 +47,7 @@ mkdir -p \
     "${SECUREBOOT_OUT}" \
     "${LICENSES_OUT}" \
     "${DOC_OUT}" \
+    "${GAMESCOPE_DISPLAY_OUT}" \
     "${SECUREBOOT_TMP_DIR}"
 
 dnf5 -y install --setopt=install_weak_deps=False \
@@ -175,6 +179,15 @@ sign_modules() {
     shopt -u nullglob
 }
 
+fetch_hdr_display_script() {
+    local output_path="${GAMESCOPE_DISPLAY_OUT}/${HDR_LUA_NAME}"
+
+    curl -fL -o "${output_path}" "${HDR_LUA_URL}"
+    sed -i \
+        's/x = 0.3095, y = 0.3095/x = 0.3070, y = 0.3235/' \
+        "${output_path}"
+}
+
 require_vendor_checkout \
     "${OPENZOTAC_REPO_DIR}" \
     "OpenZotacZone/ZotacZone-Drivers" \
@@ -274,6 +287,8 @@ CC_DOWNLOAD_URL="https://gitlab.com/coolercontrol/coolercontrol/-/releases/${COO
 
 curl -fL -o "${CC_DIR}/CoolerControlD-x86_64.AppImage" "${CC_DOWNLOAD_URL}"
 chmod +x "${CC_DIR}/CoolerControlD-x86_64.AppImage"
+
+fetch_hdr_display_script
 
 dnf5 clean all
 rm -rf \

@@ -28,7 +28,7 @@ git submodule update --init --recursive
 
 The image build has two major stages:
 
-- `artifact-builder`: compiles OpenZotacZone and ElektroCoder modules, installs upstream userspace scripts, downloads CoolerControl, optionally signs modules
+- `artifact-builder`: compiles OpenZotacZone and ElektroCoder modules, installs upstream userspace scripts, downloads CoolerControl, fetches and patches the Zotac Gamescope HDR display script, optionally signs modules
 - final image stage: copies artifacts into a `ghcr.io/ublue-os/bazzite-deck:stable` base image and runs `build_files/configure-image.sh`
 
 ## Current Defaults

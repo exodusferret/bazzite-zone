@@ -9,6 +9,8 @@ DIAL_SCRIPT="/usr/local/bin/zotac_dial_daemon.py"
 OPENZONE_MANAGER_SCRIPT="/usr/local/bin/openzone_manager.sh"
 OPENZONE_UNINSTALL_SCRIPT="/usr/local/bin/uninstall_openzone_drivers.sh"
 CC_DIR="/var/opt/coolercontrol"
+HDR_SCRIPT_SOURCE="/usr/share/gamescope/scripts/zotac.zone.oled.lua"
+HDR_INSTALLER="/usr/bin/zotac-install-gamescope-hdr"
 SECUREBOOT_CERT="/usr/share/secureboot/zotac-zone-mok.der"
 SECUREBOOT_COMPAT_CERT_DIR="/etc/pki/akmods/certs"
 SECUREBOOT_COMPAT_CERT="${SECUREBOOT_COMPAT_CERT_DIR}/akmods-zotac-zone.der"
@@ -17,6 +19,11 @@ SECUREBOOT_DEFAULT_PASSWORD="universalblue"
 rpm-ostree install \
     mokutil \
     python3-evdev
+
+if [[ ! -f "${HDR_SCRIPT_SOURCE}" ]]; then
+    echo "Missing expected HDR script artifact: ${HDR_SCRIPT_SOURCE}"
+    exit 1
+fi
 
 cat > /usr/bin/zotac-load-drivers << EOF
 #!/usr/bin/env bash
@@ -199,6 +206,45 @@ echo "[*] Starte CoolerControl neu..."
 echo "[+] Fan-Setup abgeschlossen."
 EOF
 chmod +x /usr/bin/zotac-fan-enable.sh
+
+cat > "${HDR_INSTALLER}" << EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+SOURCE="${HDR_SCRIPT_SOURCE}"
+TARGET_DIR="\${HOME}/.config/gamescope/scripts"
+TARGET_PATH="\${TARGET_DIR}/zotac.zone.oled.lua"
+
+if [[ ! -f "\${SOURCE}" ]]; then
+    echo "[zotac-gamescope-hdr] Missing source file: \${SOURCE}" >&2
+    exit 1
+fi
+
+install -d -m 755 "\${TARGET_DIR}"
+
+if [[ ! -f "\${TARGET_PATH}" ]] || ! cmp -s "\${SOURCE}" "\${TARGET_PATH}"; then
+    install -m 644 "\${SOURCE}" "\${TARGET_PATH}"
+fi
+EOF
+chmod 755 "${HDR_INSTALLER}"
+
+install -d -m 755 /usr/lib/systemd/user
+cat > /usr/lib/systemd/user/zotac-gamescope-hdr.service << EOF
+[Unit]
+Description=Install corrected Gamescope HDR display profile for Zotac Zone
+After=default.target
+
+[Service]
+Type=oneshot
+ExecStart=${HDR_INSTALLER}
+
+[Install]
+WantedBy=default.target
+EOF
+
+install -d -m 755 /etc/systemd/user/default.target.wants
+ln -sf /usr/lib/systemd/user/zotac-gamescope-hdr.service \
+    /etc/systemd/user/default.target.wants/zotac-gamescope-hdr.service
 
 cat > /usr/lib/systemd/system/coolercontrold.service << EOF
 [Unit]
