@@ -188,7 +188,7 @@ jobs:
             "${{ matrix['disk-type'] }}" \
             "${{ env.CONFIG_FILE }}" \
             "${OUTPUT_DIR}" \
-            "xfs" \
+            "btrfs" \
             "${{ env.USER_UID }}:${{ env.USER_GID }}"
 
           echo "output-directory=${OUTPUT_DIR}" >> "${GITHUB_OUTPUT}"

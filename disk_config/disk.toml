@@ -2,4 +2,3 @@
 [[customizations.filesystem]]
 mountpoint = "/"
 minsize   = "8 GiB"
-rootfs    = "xfs"

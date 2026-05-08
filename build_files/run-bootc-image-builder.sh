@@ -11,7 +11,7 @@ target_image="$2"
 disk_type="$3"
 config_file="$4"
 output_dir="${5:-./output}"
-rootfs="${6:-xfs}"
+rootfs="${6:-btrfs}"
 chown_spec="${7:-}"
 
 retry() {
