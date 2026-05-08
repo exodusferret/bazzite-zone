@@ -1,67 +1,76 @@
 ## Build Notes
 
-This file documents the current local and CI build flow for this repository.
-Use placeholder values such as `<repo-owner>`, `<repo-name>`, and `<image-name>`
-when adapting commands to another fork.
+This file documents the build flow that is actually implemented in this repository.
+It is based on the checked-in `Containerfile`, `Justfile`, build scripts, and GitHub workflows.
 
-## Managed Upstream Inputs
+## Managed Inputs
 
-The image now treats the Zotac-specific upstream sources as pinned repository
-inputs instead of resolving them dynamically during the workflow:
+The image build consumes pinned repository inputs from the working tree:
 
 - `vendor/OpenZotacZone`: `OpenZotacZone/ZotacZone-Drivers` git submodule
-- `vendor/ElektroCoder-zotac-zone-platform`: ElektroCoder gist git submodule
-- `build_files/dependencies.env`: version pins such as `COOLERCONTROL_VERSION`
+- `vendor/ElektroCoder-zotac-zone-platform`: ElektroCoder EC platform driver git submodule
+- `build_files/dependencies.env`: regex-managed version pins such as `COOLERCONTROL_VERSION`
 
-Initialize the vendored sources after cloning:
+Initialize submodules after cloning:
 
 ```bash
 git submodule update --init --recursive
 ```
 
-Update behavior:
-
-- Dependabot can update `.gitmodules` targets through the `gitsubmodule` ecosystem.
-- Renovate can update the same submodules and regex-managed version pins such as `COOLERCONTROL_VERSION`.
-- Rebuilds now happen from dependency PRs or direct repo changes, rather than from a scheduled remote source probe.
-
 ## What The Repo Builds
 
-- A bootc container image from `Containerfile`
-- A signed out-of-tree kernel module set for the target image
-- Optional disk artifacts from the container image:
+- a `bootc` container image from `Containerfile`
+- out-of-tree Zotac kernel modules in a dedicated artifact stage
+- optional disk artifacts from that image:
   - `qcow2`
+  - `raw`
   - `anaconda-iso`
 
-The primary CI workflows are:
+The image build has two major stages:
 
-- `.github/workflows/build.yml`
-- `.github/workflows/build-disk.yml`
+- `artifact-builder`: compiles OpenZotacZone and ElektroCoder modules, installs upstream userspace scripts, downloads CoolerControl, optionally signs modules
+- final image stage: copies artifacts into a `ghcr.io/ublue-os/bazzite-deck:stable` base image and runs `build_files/configure-image.sh`
 
-## Current Image Defaults
+## Current Defaults
 
-- Image registry: `ghcr.io/<repo-owner>`
-- Image name: `bazzite_zone`
-- Default tag: `latest`
-- Disk build source image: `ghcr.io/<repo-owner>/bazzite_zone:latest`
+- image name: `bazzite_zone`
+- default tag: `latest`
+- default local builder image: `quay.io/centos-bootc/bootc-image-builder:latest`
+- default base image: `ghcr.io/ublue-os/bazzite-deck:stable`
 
-If you rename the image, keep `build.yml`, `build-disk.yml`, and any local commands in sync.
+If you rename the image, keep `Justfile`, `.github/workflows/build.yml`, and `.github/workflows/build-disk.yml` in sync.
 
-## Local Container Build
+## Local Workflows
+
+Available `just` entry points:
+
+- `just build`
+- `just build-qcow2`
+- `just build-raw`
+- `just build-iso`
+- `just rebuild-qcow2`
+- `just rebuild-raw`
+- `just rebuild-iso`
+- `just run-vm-qcow2`
+- `just run-vm-raw`
+- `just run-vm-iso`
+- `just spawn-vm`
+- `just lint`
+- `just format`
 
 Build the container image locally:
+
+```bash
+just build
+```
+
+Equivalent direct `podman` build:
 
 ```bash
 podman build -t localhost/bazzite_zone:latest .
 ```
 
-This builds the same `Containerfile` used by CI, including:
-
-- external module compilation
-- Secure Boot module signing when signing inputs are provided
-- image configuration from `build_files/configure-image.sh`
-
-To mirror CI more closely, you can also pass the optional build arguments:
+To mirror CI more closely, pass Secure Boot build args:
 
 ```bash
 podman build \
@@ -72,18 +81,28 @@ podman build \
 
 Notes:
 
-- The exact `OpenZotacZone` and `ElektroCoder` source revisions come from the checked-out git submodules under `vendor/`.
-- Omit the Secure Boot arguments if you do not want locally built modules to be signed.
+- submodule revisions are taken from the checked-out `vendor/` directories
+- `just build` also passes `OPENZOTAC_REV` and `ELEKTROCODER_REV` when the submodules exist
+- omit Secure Boot args if you do not want local modules to be signed
 
 ## Local Disk Image Build
 
-The repository CI uses `build_files/run-bootc-image-builder.sh` to generate disk images.
-The script pre-pulls the builder and target images with retries, retags the builder image
-locally, and then runs it with `--pull=never` to avoid transient registry failures during
-the actual build. For local use, first build or pull the container image, then invoke the
-same helper.
+The repo provides both `just` wrappers and a lower-level helper:
 
-Example using the ISO config:
+```bash
+just build-qcow2
+just build-raw
+just build-iso
+```
+
+These routes eventually call `build_files/run-bootc-image-builder.sh`, which:
+
+- retries `podman pull` for the builder image
+- retags the builder image locally as `localhost/bootc-image-builder:ci`
+- pulls the target image only if it is not already present locally
+- runs the builder with `--pull=never`
+
+Direct helper example for an ISO:
 
 ```bash
 mkdir -p ~/image-output
@@ -93,10 +112,10 @@ mkdir -p ~/image-output
   anaconda-iso \
   "$PWD/disk_config/iso-kde.toml" \
   "$HOME/image-output" \
-  xfs
+  btrfs
 ```
 
-Example using the disk config:
+Direct helper example for a `qcow2` image:
 
 ```bash
 mkdir -p ~/image-output
@@ -106,31 +125,38 @@ mkdir -p ~/image-output
   qcow2 \
   "$PWD/disk_config/disk.toml" \
   "$HOME/image-output" \
-  xfs
+  btrfs
 ```
 
-Adjust the image reference if you want to build from a remote registry image instead of `localhost`.
+The direct helper accepts a configurable filesystem via its `rootfs` argument. The `just` helper currently passes `btrfs` for its local disk-image path.
 
-## CI Behavior
+## CI Workflows
 
-`build.yml`:
+Implemented workflows:
 
-- builds the container image on pushes to `main`, pull requests, and manual dispatch
-- consumes dependency revisions from checked-in submodules and version files
-- pushes to `ghcr.io/<repo-owner>` only on non-PR builds of the default branch
-- signs the pushed container image with Cosign on non-PR builds of the default branch
-- signs the out-of-tree kernel modules for Secure Boot on non-PR builds of the default branch when signing secrets are configured
-- records build metadata labels such as the upstream OpenZotac commit, ElektroCoder commit, and CoolerControl download URL on the published image
+- `.github/workflows/build.yml`
+- `.github/workflows/build-disk.yml`
 
-`build-disk.yml`:
+`build.yml` currently:
 
-- can be run manually
-- also runs automatically after a successful container-image workflow
-- also runs on pull requests that change `disk_config/*` or `.github/workflows/build-disk.yml`
-- produces `qcow2` and `anaconda-iso`
-- can upload artifacts either to GitHub Actions artifacts or to S3-compatible storage
+- runs on pull requests to `main`, pushes to `main`, and manual dispatch
+- ignores pure `README.md` changes on push
+- checks out submodules recursively
+- prepares image metadata labels
+- requires Secure Boot secrets for non-PR builds on the default branch
+- builds the container image with `buildah`
+- pushes to GHCR on non-PR builds of the default branch
+- signs published container images with Cosign on non-PR builds of the default branch
 
-## Required Repository Secrets
+`build-disk.yml` currently:
+
+- runs manually
+- runs after the container workflow completes
+- runs on pull requests when `disk_config/disk.toml`, `disk_config/iso-kde.toml`, or the workflow file itself changes
+- builds `qcow2` and `anaconda-iso`
+- uploads either to GitHub Actions artifacts or to S3-compatible storage
+
+## Required Secrets
 
 For non-PR builds of the default branch in `build.yml`:
 
@@ -150,39 +176,18 @@ For optional S3 upload in `build-disk.yml`:
 
 ## Secure Boot Notes
 
-The out-of-tree modules are signed during image build and the public certificate is placed in:
+When signing inputs are provided, the build places the certificate at:
 
 - `/usr/share/secureboot/zotac-zone-mok.der`
 - `/usr/share/secureboot/zotac-zone-mok.pem`
 - `/etc/pki/akmods/certs/akmods-zotac-zone.der`
 
-The image includes `/usr/bin/zotac-secureboot-enroll`, which queues MOK enrollment with `mokutil` in a Bazzite-compatible way.
-By default, the expected one-time MokManager password is `universalblue`.
+The image also installs `/usr/bin/zotac-secureboot-enroll`, which queues MOK enrollment with `mokutil`.
+The helper suggests the one-time password `universalblue`.
 
-This enrolls this repository's Secure Boot certificate. It does not reuse or replace another project's certificate.
+## TODO
 
-## Neutral Placeholder Examples
+No explicit build-flow claims were found in this README that are entirely absent from the repository, but two scope limits are worth keeping visible:
 
-Clone a fork locally:
-
-```bash
-git clone https://github.com/<repo-owner>/<repo-name>.git
-cd <repo-name>
-```
-
-Pull a published image from GHCR:
-
-```bash
-sudo podman pull ghcr.io/<repo-owner>/<image-name>:latest
-```
-
-Tag it for local bootc image builds:
-
-```bash
-sudo podman tag ghcr.io/<repo-owner>/<image-name>:latest localhost/<image-name>:latest
-```
-
-## Notes
-
-- Avoid committing private signing material such as `cosign.key` or `secureboot/MOK.priv`.
-- The canonical project-level setup and secret-generation commands live in `README.md`.
+- `disk_config/iso-gnome.toml` exists in the repo, but the current `Justfile` and CI workflows only wire `iso-kde.toml`
+- this document reflects static repo analysis; it does not guarantee that every build path succeeds in every external environment or with every upstream image revision

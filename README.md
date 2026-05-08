@@ -1,182 +1,239 @@
-# OpenZotacZone Bazzite Image for the Zotac Zone Handheld
+# Bazzite Zone
 
-This project builds a **custom** Bazzite image for the Zotac Zone gaming handheld with integrated OpenZotacZone drivers, 144 Hz and HDR fixes, improved fan control, and a preinstalled Decky Loader with a curated plugin set.[page:2]
+Custom Bazzite / `bootc` image for the Zotac Zone.
 
-## Why this image?
+## What It Is
 
-OpenZotacZone drivers installed via `build.sh` or manual scripts are only temporary and need to be rebuilt and reinstalled after kernel updates.
-A custom Bazzite-based image makes these drivers persistent – they survive system updates, reboots, and rebases within the Universal Blue / bootc workflow.
+- Base image: `ghcr.io/ublue-os/bazzite-deck:stable`
+- Target device: Zotac Zone
+- Purpose:
+  - bake Zotac-specific drivers into the image
+  - avoid reinstalling out-of-tree modules after every kernel update
+  - provide a build path for container, `qcow2`, `raw`, and installer ISO artifacts
 
-## Based on
+## What Is Included
 
-- Zotac-specific adjustments: [https://github.com/Reed-Schimmel/ZotacBazzite](https://github.com/Reed-Schimmel/ZotacBazzite)  
-- Official Universal Blue image template: [https://github.com/ublue-os/image-template](https://github.com/ublue-os/image-template)
+- OpenZotacZone userspace:
+  - `/usr/local/bin/openzone_manager.sh`
+  - `/usr/local/bin/uninstall_openzone_drivers.sh`
+  - `/usr/local/bin/zotac_dial_daemon.py`
+- OpenZotacZone kernel modules:
+  - `/usr/lib/modules/<kernel>/extra/zotac-zone/*.ko`
+  - `/usr/local/lib/zotac-zone/*.ko`
+- ElektroCoder EC fan module:
+  - `/usr/lib/zotac-zone-fan/zotac-zone-platform.ko`
+- CoolerControl daemon AppImage:
+  - `/var/opt/coolercontrol/CoolerControlD-x86_64.AppImage`
+- Image-managed services:
+  - `zotac-zone-drivers.service`
+  - `zotac-dials.service`
+  - `coolercontrold.service`
+  - `zotac-fan.service`
+- Secure Boot helper:
+  - `/usr/bin/zotac-secureboot-enroll`
 
-## Disclaimer
+## What Works In This Repo
 
-This project is provided as-is, without warranty of any kind, express or implied.
-Use it at your own risk.
-The authors and contributors accept no liability for hardware damage, data loss, failed updates, or any other issues resulting from the use, modification, or redistribution of this image or the included scripts.
+- build Zotac driver artifacts during image build
+- install and enable the driver/dial/fan services
+- sign kernel modules in release builds when signing secrets are provided
+- ship MOK certificate files for Secure Boot enrollment
+- build container images in CI
+- build `qcow2` and `anaconda-iso` artifacts in CI
 
-## Features
+## What Users Can Do
 
-- Integrated OpenZotacZone drivers and userspace tools, baked into the image from the upstream repository and automatically loaded on boot.
-- Release builds sign the out-of-tree kernel modules for Secure Boot and ship the public MOK certificate for enrollment.
-- Zotac Zone–specific functionality:
-  - Fully functional back buttons (P4/P3-like).
-  - RGB lighting controllable via OpenRGB.
-  - Fan curves (EC fan control) managed via CoolerControl.
-  - Joystick dials with precise input via rotation and press.
-  - Extended HID protocol support.
-  - Touchpad tweaks for more precise input.
-  - HDR fix scripts for more reliable HDR activation in supported games
-  - 144 Hz fixes (X11/Wayland configuration + Gamescope/KWin tuning) so the panel runs consistently at 144 Hz.
+- install or boot a disk artifact built from this repo
+- use `openzone_manager.sh` for:
+  - back button mapping
+  - RGB settings
+  - dial behavior
+  - deadzones
+  - vibration
+- use `zotac-secureboot-enroll` on Secure Boot systems
 
-## Secure Boot
+## What Is Not In This Repo
 
-Release builds on `main` now expect two GitHub Actions secrets:
+- no repo-managed `144 Hz` fix
+- no repo-managed HDR fix
+- no Decky Loader setup
+- no curated Decky plugin set
+- no OpenRGB package integration
+- no touchpad tuning layer
 
-- `SECUREBOOT_MOK_KEY`: PEM-encoded private key used to sign the kernel modules.
-- `SECUREBOOT_MOK_CERT`: Matching PEM-encoded X.509 certificate.
+## Usage
 
-The build passes those secrets only into the artifact-builder stage, decodes them temporarily during module compilation, signs the generated `.ko` files with the kernel `sign-file` helper, and publishes the public certificate inside the image at `/usr/share/secureboot/zotac-zone-mok.der` and `/usr/share/secureboot/zotac-zone-mok.pem`.
+### Built Image
 
-To use the signed modules on a Secure Boot system, enroll that certificate with `mokutil` before loading the image's out-of-tree modules. The image also exposes the same certificate at `/etc/pki/akmods/certs/akmods-zotac-zone.der` and ships `/usr/bin/zotac-secureboot-enroll` for a Bazzite-compatible enrollment flow.
+- container image output:
+  - from `Containerfile`
+- disk image outputs:
+  - `qcow2`
+  - `raw`
+  - `anaconda-iso`
 
-That helper follows the same user-facing password convention Bazzite uses and prompts for the one-time MOK password `universalblue`. This enrolls this project's own certificate, not Bazzite's certificate.
+### Install / First Boot
 
-Generate a new MOK keypair once:
+- flash or boot a disk artifact built from this repo
+- complete the normal Bazzite first-boot setup
+- after the first boot:
+  - on Secure Boot systems, enroll the project MOK before expecting the Zotac modules to load
+  - on non-Secure-Boot systems, the Zotac modules load without MOK enrollment
 
-```bash
-mkdir -p secureboot
-openssl req \
-  -new -x509 \
-  -newkey rsa:4096 \
-  -keyout secureboot/MOK.priv \
-  -out secureboot/MOK.pem \
-  -nodes \
-  -days 3650 \
-  -subj "/CN=Zotac Zone Module Signing/"
-openssl x509 -outform DER \
-  -in secureboot/MOK.pem \
-  -out secureboot/MOK.der
-chmod 600 secureboot/MOK.priv
-```
+### Secure Boot / MOK
 
-Add the PEM files to GitHub Actions secrets for this repository:
+- release builds sign the bundled Zotac kernel modules
+- certificate paths in the image:
+  - `/usr/share/secureboot/zotac-zone-mok.der`
+  - `/usr/share/secureboot/zotac-zone-mok.pem`
+  - `/etc/pki/akmods/certs/akmods-zotac-zone.der`
+- enrollment helper:
+  - `/usr/bin/zotac-secureboot-enroll`
+- default one-time MOK password:
+  - `universalblue`
 
-```bash
-gh secret set SECUREBOOT_MOK_KEY < secureboot/MOK.priv
-gh secret set SECUREBOOT_MOK_CERT < secureboot/MOK.pem
-```
+### Secure Boot Setup
 
-Default boot-time behavior:
-
-1. If `/usr/share/secureboot/zotac-zone-mok.der` is already enrolled, nothing happens.
-2. If Secure Boot is disabled, nothing happens.
-3. If the certificate is not enrolled, `zotac-zone-drivers.service` does not load the Zotac modules yet.
-4. Run `sudo /usr/bin/zotac-secureboot-enroll`.
-5. The helper runs `mokutil --timeout -1` and `mokutil --import /etc/pki/akmods/certs/akmods-zotac-zone.der`.
-6. It only reports `Enrollment request queued.` after confirming the certificate appears in `mokutil --list-new`.
-7. On the next boot, MokManager appears and you must confirm the enrollment manually.
-
-Queue enrollment manually:
+1. Boot the installed image.
+2. Run:
 
 ```bash
 sudo /usr/bin/zotac-secureboot-enroll
 ```
 
-The helper prompts you for the one-time MOK password during `mokutil --import`. Use `universalblue` if you want to match the Universal Blue convention.
+3. The helper queues the import using the built-in one-time MOK password listed above.
+4. Reboot.
+5. In MokManager:
+   - choose `Enroll MOK`
+   - confirm enrollment
+   - enter the same one-time MOK password
+6. Reboot back into the system.
 
-Manual enrollment stays available if you do not want to use the helper:
+### Secure Boot Behavior
+
+- if the certificate is already enrolled:
+  - `zotac-load-drivers` loads the Zotac modules normally
+- if Secure Boot is enabled and the certificate is not enrolled:
+  - `zotac-load-drivers` exits without loading the Zotac modules
+  - the system tells the user to run `zotac-secureboot-enroll`
+- if Secure Boot is disabled:
+  - no enrollment is needed
+
+### Manual MOK Enrollment
 
 ```bash
 sudo mokutil --timeout -1
 sudo mokutil --import /etc/pki/akmods/certs/akmods-zotac-zone.der
 ```
 
-MokManager still requires manual confirmation on the next boot; this part cannot be fully automated.
+- then reboot
+- complete enrollment in MokManager
+- use the same one-time password you entered during `mokutil --import`
 
-After the import is staged, reboot and complete the enrollment in the blue MOK Manager screen:
-
-1. Choose `Enroll MOK`.
-2. Confirm the key enrollment.
-3. Enter the password you chose during `mokutil --import`. If you followed the helper's convention, that is `universalblue`.
-4. Reboot back into the system.
-
-Once enrolled, future images signed with the same keypair will load without disabling Secure Boot.
-
-## OpenZotacZone Integration
-
-`bazzite-zone` now consumes the upstream `OpenZotacZone/ZotacZone-Drivers` repository as a build input instead of keeping a local copy of the dial daemon logic. The artifact stage:
-
-- consumes the exact upstream revisions pinned in `vendor/` submodules,
-- builds the OpenZotacZone kernel modules from that checkout,
-- installs the upstream `openzone_manager.sh`, `uninstall_openzone_drivers.sh`, and extracted `zotac_dial_daemon.py`,
-- keeps Bazzite-specific glue local only for image concerns such as Secure Boot enrollment, module signing, and systemd placement.
-
-The dependency management model is now:
-
-- `vendor/OpenZotacZone`: pinned git submodule for `OpenZotacZone/ZotacZone-Drivers`
-- `vendor/ElektroCoder-zotac-zone-platform`: pinned git submodule for the external EC driver source
-- `build_files/dependencies.env`: regex-managed version pins such as `COOLERCONTROL_VERSION`
-
-That lets Dependabot and Renovate open normal PRs when upstream inputs change, and the image rebuilds only when one of those tracked inputs actually changes.
-
-To preserve upstream script compatibility while avoiding mutable `/etc` drift on an image-based system, the image keeps the upstream tools at:
-
-- `/usr/local/bin/openzone_manager.sh`
-- `/usr/local/bin/uninstall_openzone_drivers.sh`
-- `/usr/local/bin/zotac_dial_daemon.py`
-
-and installs the managed services under:
-
-- `/usr/lib/systemd/system/zotac-zone-drivers.service`
-- `/usr/lib/systemd/system/zotac-dials.service`
-
-## Licensing
-
-This repository's original project files are licensed under Apache-2.0. That
-does not change the license of third-party software redistributed in the built
-image.
-
-The built image redistributes GPL-3.0-covered components from
-`OpenZotacZone/ZotacZone-Drivers`, including:
-
-- `openzone_manager.sh`
-- `uninstall_openzone_drivers.sh`
-- `zotac_dial_daemon.py`
-- OpenZotacZone kernel modules built from upstream source
-
-To keep that redistribution compliant, the image also ships:
-
-- the upstream GPL-3.0 license at `/usr/share/licenses/bazzite-zone/OpenZotacZone-GPL-3.0.txt`
-- source metadata at `/usr/share/doc/bazzite-zone/openzotaczone-source-info.txt`
-- a corresponding source bundle at `/usr/share/doc/bazzite-zone/openzotaczone-corresponding-source.tar.gz`
-
-See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for the project-level
-notice.
-
-## GitHub Actions Configuration
-
-No custom GitHub Actions repository variables are required at the moment. The workflows rely on repository secrets and the built-in `GITHUB_TOKEN`.
-
-Initialize the vendored dependencies after cloning:
+### On The Installed System
 
 ```bash
+sudo /usr/local/bin/openzone_manager.sh
+```
+
+```bash
+sudo /usr/bin/zotac-secureboot-enroll
+```
+
+## Developer Setup
+
+### Requirements
+
+- `git`
+- `podman`
+- `just`
+- `sudo`
+
+### Clone
+
+```bash
+git clone <repo-url>
+cd bazzite-zone
 git submodule update --init --recursive
 ```
 
-The container-image workflow now reads dependency revisions directly from the checked-out repository state. Submodule update PRs from Dependabot or Renovate become the clean trigger for rebuilding the image.
+### Local Build
 
-Required secrets for normal image publishing:
+```bash
+just build
+```
 
-- `SIGNING_SECRET`: Cosign private key used to sign the pushed container image.
-- `COSIGN_PASSWORD`: Password protecting the Cosign private key.
-- `SECUREBOOT_MOK_KEY`: PEM private key used for kernel module signing.
-- `SECUREBOOT_MOK_CERT`: Matching PEM certificate used for kernel module signing.
+### Local Disk Artifacts
 
-Optional secrets for the disk-image upload path in `.github/workflows/build-disk.yml`:
+```bash
+just build-qcow2
+just build-raw
+just build-iso
+```
+
+### Local VM Run
+
+```bash
+just run-vm-qcow2
+just run-vm-raw
+just run-vm-iso
+```
+
+### Developer Commands
+
+- `just build`
+- `just build-qcow2`
+- `just build-raw`
+- `just build-iso`
+- `just rebuild-qcow2`
+- `just rebuild-raw`
+- `just rebuild-iso`
+- `just run-vm-qcow2`
+- `just run-vm-raw`
+- `just run-vm-iso`
+- `just spawn-vm`
+- `just lint`
+- `just format`
+
+## Build Layout
+
+- [Containerfile](/home/NLAB.local/nico/projects/bazzite-zone/Containerfile:1)
+  - image definition
+  - artifact stage
+  - final image stage
+- [build_files/build-modules.sh](/home/NLAB.local/nico/projects/bazzite-zone/build_files/build-modules.sh:1)
+  - build OpenZotacZone modules
+  - build ElektroCoder EC module
+  - download CoolerControl
+  - optional Secure Boot signing
+- [build_files/configure-image.sh](/home/NLAB.local/nico/projects/bazzite-zone/build_files/configure-image.sh:1)
+  - install runtime packages
+  - install services and helper scripts
+  - enable services
+- [build_files/run-bootc-image-builder.sh](/home/NLAB.local/nico/projects/bazzite-zone/build_files/run-bootc-image-builder.sh:1)
+  - build disk artifacts from a container image
+- [Justfile](/home/NLAB.local/nico/projects/bazzite-zone/Justfile:1)
+  - local build and VM commands
+
+## CI
+
+- [build.yml](/home/NLAB.local/nico/projects/bazzite-zone/.github/workflows/build.yml:1)
+  - build container image
+  - push to GHCR on default-branch non-PR builds
+  - Cosign signing
+  - Secure Boot signing inputs
+- [build-disk.yml](/home/NLAB.local/nico/projects/bazzite-zone/.github/workflows/build-disk.yml:1)
+  - build `qcow2` and `anaconda-iso`
+  - optional S3 upload
+
+### Required Secrets
+
+- `SIGNING_SECRET`
+- `COSIGN_PASSWORD`
+- `SECUREBOOT_MOK_KEY`
+- `SECUREBOOT_MOK_CERT`
+
+### Optional Secrets
 
 - `S3_PROVIDER`
 - `S3_ACCESS_KEY_ID`
@@ -185,45 +242,67 @@ Optional secrets for the disk-image upload path in `.github/workflows/build-disk
 - `S3_ENDPOINT`
 - `S3_BUCKET_NAME`
 
-Generate the Cosign keypair once:
+## Third-Party Code And Licenses
 
-```bash
-COSIGN_PASSWORD='replace-with-a-strong-password'
-export COSIGN_PASSWORD
-cosign generate-key-pair
-unset COSIGN_PASSWORD
-```
+### Repo License
 
-That creates `cosign.key` and `cosign.pub`. Store the private key and password in GitHub secrets:
+- repo-owned files: Apache-2.0
+- file: [LICENSE](/home/NLAB.local/nico/projects/bazzite-zone/LICENSE:1)
 
-```bash
-gh secret set SIGNING_SECRET < cosign.key
-gh secret set COSIGN_PASSWORD --body 'replace-with-the-same-cosign-password'
-```
+### Included / Vendored Projects
 
-Generate the Secure Boot signing keypair once:
+- `OpenZotacZone/ZotacZone-Drivers`
+  - location: `vendor/OpenZotacZone`
+  - role:
+    - source for HID/platform modules
+    - source for `openzone_manager.sh`
+    - source for `uninstall_openzone_drivers.sh`
+    - source for `zotac_dial_daemon.py` extraction
+  - license: GPL-3.0
+  - distributed in built image: yes
 
-```bash
-mkdir -p secureboot
-openssl req \
-  -new -x509 \
-  -newkey rsa:4096 \
-  -keyout secureboot/MOK.priv \
-  -out secureboot/MOK.pem \
-  -nodes \
-  -days 3650 \
-  -subj "/CN=Zotac Zone Module Signing/"
-openssl x509 -outform DER \
-  -in secureboot/MOK.pem \
-  -out secureboot/MOK.der
-chmod 600 secureboot/MOK.priv
-```
+- `ElektroCoder-zotac-zone-platform`
+  - location: `vendor/ElektroCoder-zotac-zone-platform`
+  - role:
+    - source for `zotac-zone-platform.ko`
+  - license:
+    - not declared in this repo copy
+    - treat as third-party source input
+  - distributed in built image:
+    - built kernel module
 
-Store the Secure Boot signing keypair in GitHub secrets:
+- `CoolerControl`
+  - source:
+    - downloaded during build from pinned release URL in `build_files/dependencies.env`
+  - role:
+    - fan control daemon AppImage
+  - license:
+    - not declared in this repo
+    - upstream project license applies
+  - distributed in built image: yes
 
-```bash
-gh secret set SECUREBOOT_MOK_KEY < secureboot/MOK.priv
-gh secret set SECUREBOOT_MOK_CERT < secureboot/MOK.pem
-```
+- `Universal Blue / Bazzite`
+  - role:
+    - base image and bootc workflow foundation
+  - integrated as:
+    - base image `ghcr.io/ublue-os/bazzite-deck:stable`
+  - vendored in this repo: no
 
-The S3-related secrets are not generated locally by this repo; they must come from your object-storage provider if you want `build-disk.yml` to upload artifacts automatically.
+### License Handling In Built Image
+
+- OpenZotacZone GPL license copied to:
+  - `/usr/share/licenses/bazzite-zone/OpenZotacZone-GPL-3.0.txt`
+- OpenZotacZone source metadata written to:
+  - `/usr/share/doc/bazzite-zone/openzotaczone-source-info.txt`
+- OpenZotacZone corresponding source bundle written to:
+  - `/usr/share/doc/bazzite-zone/openzotaczone-corresponding-source.tar.gz`
+
+- project notice file:
+  - [THIRD_PARTY_NOTICES.md](/home/NLAB.local/nico/projects/bazzite-zone/THIRD_PARTY_NOTICES.md:1)
+
+## Notes
+
+- `disk_config/iso-gnome.toml` exists, but current local and CI flows use `iso-kde.toml`
+- README scope:
+  - only features wired by this repo
+  - no claims for base-image behavior not implemented here
