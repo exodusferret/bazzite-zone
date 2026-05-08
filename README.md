@@ -51,7 +51,7 @@ Custom Bazzite / `bootc` image for the Zotac Zone.
   - deadzones
   - vibration
 - get a corrected Gamescope HDR display profile installed into
-  `~/.config/gamescope/scripts/zotac.zone.oled.lua` at user login
+  `~/.config/gamescope/scripts/00-gamescope/displays/zotac.zone.oled.lua` at user login
 - use `zotac-secureboot-enroll` on Secure Boot systems
 
 ## What Is Not In This Repo

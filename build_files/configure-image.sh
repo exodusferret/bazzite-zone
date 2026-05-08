@@ -9,12 +9,17 @@ DIAL_SCRIPT="/usr/local/bin/zotac_dial_daemon.py"
 OPENZONE_MANAGER_SCRIPT="/usr/local/bin/openzone_manager.sh"
 OPENZONE_UNINSTALL_SCRIPT="/usr/local/bin/uninstall_openzone_drivers.sh"
 CC_DIR="/var/opt/coolercontrol"
-HDR_SCRIPT_SOURCE="/usr/share/gamescope/scripts/zotac.zone.oled.lua"
+HDR_SCRIPT_SOURCE="/usr/share/gamescope/scripts/00-gamescope/displays/zotac.zone.oled.lua"
 HDR_INSTALLER="/usr/bin/zotac-install-gamescope-hdr"
 SECUREBOOT_CERT="/usr/share/secureboot/zotac-zone-mok.der"
 SECUREBOOT_COMPAT_CERT_DIR="/etc/pki/akmods/certs"
 SECUREBOOT_COMPAT_CERT="${SECUREBOOT_COMPAT_CERT_DIR}/akmods-zotac-zone.der"
 SECUREBOOT_DEFAULT_PASSWORD="universalblue"
+STEAMOS_MANAGER_ETC_DIR="/etc/steamos-manager"
+STEAMOS_MANAGER_SHARE_DIR="/usr/share/steamos-manager"
+STEAMOS_MANAGER_DEVICES_DIR="${STEAMOS_MANAGER_SHARE_DIR}/devices"
+STEAMOS_MANAGER_DEVICE_CONFIG="${STEAMOS_MANAGER_DEVICES_DIR}/zotac-gaming-zone.toml"
+STEAMOS_MANAGER_CONFIG="${STEAMOS_MANAGER_ETC_DIR}/config.toml"
 
 rpm-ostree install \
     mokutil \
@@ -100,6 +105,18 @@ EOF
 
 install -d -m 755 "${SECUREBOOT_COMPAT_CERT_DIR}"
 ln -sf "${SECUREBOOT_CERT}" "${SECUREBOOT_COMPAT_CERT}"
+
+install -d -m 755 \
+    "${STEAMOS_MANAGER_ETC_DIR}" \
+    "${STEAMOS_MANAGER_SHARE_DIR}/system.d" \
+    "${STEAMOS_MANAGER_DEVICES_DIR}"
+
+if [[ ! -f "${STEAMOS_MANAGER_DEVICE_CONFIG}" ]]; then
+    echo "Missing expected steamos-manager device profile: ${STEAMOS_MANAGER_DEVICE_CONFIG}"
+    exit 1
+fi
+
+ln -sf "${STEAMOS_MANAGER_DEVICE_CONFIG}" "${STEAMOS_MANAGER_CONFIG}"
 
 cat > /usr/bin/zotac-secureboot-enroll << EOF
 #!/usr/bin/env bash
@@ -212,7 +229,7 @@ cat > "${HDR_INSTALLER}" << EOF
 set -euo pipefail
 
 SOURCE="${HDR_SCRIPT_SOURCE}"
-TARGET_DIR="\${HOME}/.config/gamescope/scripts"
+TARGET_DIR="\${HOME}/.config/gamescope/scripts/00-gamescope/displays"
 TARGET_PATH="\${TARGET_DIR}/zotac.zone.oled.lua"
 
 if [[ ! -f "\${SOURCE}" ]]; then
