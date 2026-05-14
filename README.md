@@ -155,7 +155,24 @@ sudo /usr/bin/zotac-secureboot-enroll
 ```bash
 git clone <repo-url>
 cd bazzite-zone
+git submodule sync --recursive
 git submodule update --init --recursive
+```
+
+If an older local submodule config still points `vendor/OpenZotacZone` at the wrong
+remote, `git submodule sync --recursive` refreshes it from `.gitmodules`.
+
+If that submodule was already initialized with the legacy remote, reset it directly:
+
+```bash
+git -C vendor/OpenZotacZone remote set-url origin https://github.com/exodusferret/ZotacZone-Drivers.git
+```
+
+If you want the latest `main` from `exodusferret/ZotacZone-Drivers` rather than this
+repository's pinned submodule commit, use:
+
+```bash
+git submodule update --init --recursive --remote
 ```
 
 ### Local Build

@@ -14,7 +14,24 @@ The image build consumes pinned repository inputs from the working tree:
 Initialize submodules after cloning:
 
 ```bash
+git submodule sync --recursive
 git submodule update --init --recursive
+```
+
+If `vendor/OpenZotacZone` was initialized earlier with an old URL, resync it before
+updating so the checkout uses `exodusferret/ZotacZone-Drivers`.
+
+If the already-initialized submodule still keeps the old `origin`, reset it directly:
+
+```bash
+git -C vendor/OpenZotacZone remote set-url origin https://github.com/exodusferret/ZotacZone-Drivers.git
+```
+
+To move the submodule to the current tip of `exodusferret/ZotacZone-Drivers` `main`
+instead of the commit pinned by this repository, use:
+
+```bash
+git submodule update --init --recursive --remote
 ```
 
 ## What The Repo Builds
