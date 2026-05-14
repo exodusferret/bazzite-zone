@@ -56,6 +56,13 @@ jobs:
         run: |
           set -euo pipefail
 
+          IMAGE_TAG="${DEFAULT_TAG}"
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_run" && "${{ github.event.workflow_run.head_branch }}" == "testing" ]]; then
+            IMAGE_TAG="testing"
+          elif [[ "${GITHUB_REF}" == "refs/heads/testing" ]]; then
+            IMAGE_TAG="testing"
+          fi
+
           if [[ "${GITHUB_EVENT_NAME}" != "workflow_run" ]]; then
             echo "should_build=true" >> "${GITHUB_OUTPUT}"
             exit 0
@@ -83,7 +90,7 @@ jobs:
             manifest="$(curl -fsSL \
               -H "Authorization: Bearer ${token}" \
               -H "Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
-              "https://ghcr.io/v2/${IMAGE_REPO}/manifests/${DEFAULT_TAG}")"
+              "https://ghcr.io/v2/${IMAGE_REPO}/manifests/${IMAGE_TAG}")"
             config_digest="$(jq -r '.config.digest // empty' <<< "${manifest}")"
 
             if [[ -z "${config_digest}" ]]; then
@@ -136,8 +143,15 @@ jobs:
           USER_UID=$(id -u)
           USER_GID=$(id -g)
           DISK_TYPE=$(echo "${{ matrix['disk-type'] }}" | tr ' ' '-')
+          IMAGE_TAG="${DEFAULT_TAG}"
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_run" && "${{ github.event.workflow_run.head_branch }}" == "testing" ]]; then
+            IMAGE_TAG="testing"
+          elif [[ "${GITHUB_REF}" == "refs/heads/testing" ]]; then
+            IMAGE_TAG="testing"
+          fi
           echo "IMAGE_REGISTRY=${IMAGE_REGISTRY,,}" >> "${GITHUB_ENV}"
           echo "IMAGE_NAME=${IMAGE_NAME,,}" >> "${GITHUB_ENV}"
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> "${GITHUB_ENV}"
           echo "DISK_TYPE=${DISK_TYPE}" >> "${GITHUB_ENV}"
           echo "USER_UID=${USER_UID}" >> "${GITHUB_ENV}"
           echo "USER_GID=${USER_GID}" >> "${GITHUB_ENV}"
@@ -184,7 +198,7 @@ jobs:
 
           ./build_files/run-bootc-image-builder.sh \
             "${{ env.BIB_IMAGE }}" \
-            "${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.DEFAULT_TAG }}" \
+            "${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}" \
             "${{ matrix['disk-type'] }}" \
             "${{ env.CONFIG_FILE }}" \
             "${OUTPUT_DIR}" \
