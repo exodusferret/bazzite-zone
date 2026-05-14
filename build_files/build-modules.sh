@@ -190,7 +190,7 @@ fetch_hdr_display_script() {
 
 require_vendor_checkout \
     "${OPENZOTAC_REPO_DIR}" \
-    "OpenZotacZone/ZotacZone-Drivers" \
+    "exodusferret/ZotacZone-Drivers" \
     "install_openzone_drivers.sh" \
     "openzone_manager.sh" \
     "uninstall_openzone_drivers.sh" \
