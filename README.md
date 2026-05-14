@@ -252,7 +252,7 @@ just run-vm-iso
 
 ### Included / Vendored Projects
 
-- `OpenZotacZone/ZotacZone-Drivers`
+- `exodusferret/ZotacZone-Drivers`
   - location: `vendor/OpenZotacZone`
   - role:
     - source for HID/platform modules

@@ -7,7 +7,7 @@ It is based on the checked-in `Containerfile`, `Justfile`, build scripts, and Gi
 
 The image build consumes pinned repository inputs from the working tree:
 
-- `vendor/OpenZotacZone`: `OpenZotacZone/ZotacZone-Drivers` git submodule
+- `vendor/OpenZotacZone`: `exodusferret/ZotacZone-Drivers` git submodule
 - `vendor/ElektroCoder-zotac-zone-platform`: ElektroCoder EC platform driver git submodule
 - `build_files/dependencies.env`: regex-managed version pins such as `COOLERCONTROL_VERSION`
 

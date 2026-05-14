@@ -4,9 +4,9 @@ This repository contains original project code licensed under Apache-2.0, as
 described in [LICENSE](./LICENSE).
 
 The built image also redistributes components from
-`OpenZotacZone/ZotacZone-Drivers`, which is licensed under GPL-3.0:
+`exodusferret/ZotacZone-Drivers`, which is licensed under GPL-3.0:
 
-- upstream repository: `https://github.com/OpenZotacZone/ZotacZone-Drivers`
+- upstream repository: `https://github.com/exodusferret/ZotacZone-Drivers`
 - upstream license: GPL-3.0
 - redistributed components:
   - `openzone_manager.sh`

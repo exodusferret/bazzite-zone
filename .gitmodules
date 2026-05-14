@@ -1,6 +1,6 @@
 [submodule "vendor/OpenZotacZone"]
 	path = vendor/OpenZotacZone
-	url = https://github.com/OpenZotacZone/ZotacZone-Drivers.git
+	url = https://github.com/exodusferret/ZotacZone-Drivers.git
 	branch = main
 [submodule "vendor/ElektroCoder-zotac-zone-platform"]
 	path = vendor/ElektroCoder-zotac-zone-platform
