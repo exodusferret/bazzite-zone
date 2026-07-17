@@ -48,7 +48,7 @@ FROM ${BASE_IMAGE} AS bazzite-zone-deck
 #
 # ... and so on, here are more base images
 # Universal Blue Images: https://github.com/orgs/ublue-os/packages
-# Fedora base image: quay.io/fedora/fedora-bootc:41
+# Fedora base image: quay.io/fedora/fedora-bootc:44
 # CentOS base images: quay.io/centos-bootc/centos-bootc:stream10
 
 ### [IM]MUTABLE /opt
@@ -63,7 +63,7 @@ FROM ${BASE_IMAGE} AS bazzite-zone-deck
 # RUN rm /opt && mkdir /opt
 
 ### MODIFICATIONS
-## Disable repos that have recently caused FC43 depsolve failures.
+## Disable repos that can cause dependency-resolution failures during image builds.
 RUN if grep -Rqs "^\[updates-archive\]" /etc/yum.repos.d; then \
       for f in /etc/yum.repos.d/*.repo; do \
         if grep -q "^\[updates-archive\]" "$f"; then \
