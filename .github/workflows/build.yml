@@ -10,6 +10,8 @@ on:
       - testing
     paths-ignore:
       - '**/README.md'
+  schedule:
+    - cron: '17 */6 * * *'
   workflow_dispatch:
 
 env:
@@ -25,8 +27,104 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  precheck:
+    name: Check upstream base image
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      base_digest: ${{ steps.check.outputs.base_digest }}
+      should_build: ${{ steps.check.outputs.should_build }}
+    steps:
+      - name: Compare upstream and published image digests
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BASE_REPO="ublue-os/bazzite-deck"
+          BASE_TAG="stable"
+          IMAGE_REPO="${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_NAME,,}"
+          BASE_DIGEST_LABEL="io.github.bazzite-zone.base-image-digest"
+
+          get_registry_token() {
+            local repository="$1"
+            curl -fsSL \
+              -u "${GITHUB_ACTOR}:${GH_TOKEN}" \
+              "https://ghcr.io/token?service=ghcr.io&scope=repository:${repository}:pull" \
+              | jq -er '.token'
+          }
+
+          get_manifest() {
+            local repository="$1"
+            local reference="$2"
+            local token="$3"
+            curl -fsSL \
+              -H "Authorization: Bearer ${token}" \
+              -H "Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
+              "https://ghcr.io/v2/${repository}/manifests/${reference}"
+          }
+
+          get_manifest_digest() {
+            local repository="$1"
+            local reference="$2"
+            local token="$3"
+            curl -fsSLI \
+              -H "Authorization: Bearer ${token}" \
+              -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json" \
+              "https://ghcr.io/v2/${repository}/manifests/${reference}" \
+              | awk 'tolower($1) == "docker-content-digest:" { gsub("\\r", "", $2); print $2 }'
+          }
+
+          get_published_base_digest() {
+            local token="$1"
+            local manifest config_digest
+
+            manifest="$(get_manifest "${IMAGE_REPO}" "${DEFAULT_TAG}" "${token}")"
+            config_digest="$(jq -er '.config.digest' <<< "${manifest}")"
+
+            curl -fsSL \
+              -H "Authorization: Bearer ${token}" \
+              "https://ghcr.io/v2/${IMAGE_REPO}/blobs/${config_digest}" \
+              | jq -er --arg label "${BASE_DIGEST_LABEL}" '.config.Labels[$label]'
+          }
+
+          BASE_TOKEN="$(get_registry_token "${BASE_REPO}")"
+          BASE_DIGEST="$(get_manifest_digest "${BASE_REPO}" "${BASE_TAG}" "${BASE_TOKEN}")"
+
+          if [[ ! "${BASE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Unable to resolve a valid digest for ghcr.io/${BASE_REPO}:${BASE_TAG}." >&2
+            exit 1
+          fi
+
+          echo "base_digest=${BASE_DIGEST}" >> "${GITHUB_OUTPUT}"
+
+          if [[ "${GITHUB_EVENT_NAME}" != "schedule" ]]; then
+            echo "Non-scheduled event; building unconditionally."
+            echo "should_build=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          PUBLISHED_DIGEST=""
+          if IMAGE_TOKEN="$(get_registry_token "${IMAGE_REPO}" 2>/dev/null)"; then
+            PUBLISHED_DIGEST="$(get_published_base_digest "${IMAGE_TOKEN}" 2>/dev/null || true)"
+          fi
+
+          if [[ "${PUBLISHED_DIGEST}" == "${BASE_DIGEST}" ]]; then
+            echo "The published image already uses ${BASE_REPO}@${BASE_DIGEST}; skipping."
+            echo "should_build=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "Upstream digest changed or no prior digest label exists; building."
+            echo "should_build=true" >> "${GITHUB_OUTPUT}"
+          fi
+
   build_push:
     name: Build and push image
+    needs: precheck
+    if: needs.precheck.outputs.should_build == 'true'
     runs-on: ubuntu-24.04
 
     permissions:
@@ -62,6 +160,7 @@ jobs:
             echo "io.github.bazzite-zone.openzotac-sha=${OPENZOTAC_SHA}"
             echo "io.github.bazzite-zone.elektrocoder-sha=${ELEKTROCODER_SHA}"
             echo "io.github.bazzite-zone.coolercontrol-url=${COOLERCONTROL_URL}"
+            echo "io.github.bazzite-zone.base-image-digest=${{ needs.precheck.outputs.base_digest }}"
             echo 'EOF'
           } >> "${GITHUB_ENV}"
 
@@ -138,6 +237,7 @@ jobs:
           image: ${{ env.IMAGE_NAME }}
           tags: ${{ steps.metadata.outputs.tags }}
           build-args: |
+            BASE_IMAGE=ghcr.io/ublue-os/bazzite-deck@${{ needs.precheck.outputs.base_digest }}
             SECUREBOOT_MOK_KEY_B64=${{ env.SECUREBOOT_MOK_KEY_B64 }}
             SECUREBOOT_MOK_CERT_B64=${{ env.SECUREBOOT_MOK_CERT_B64 }}
             OPENZOTAC_REV=${{ env.OPENZOTAC_REV }}
