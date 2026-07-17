@@ -48,7 +48,7 @@ FROM ${BASE_IMAGE} AS bazzite-zone-deck
 #
 # ... and so on, here are more base images
 # Universal Blue Images: https://github.com/orgs/ublue-os/packages
-# Fedora base image: quay.io/fedora/fedora-bootc:44
+# Fedora base image: quay.io/fedora/fedora-bootc:43
 # CentOS base images: quay.io/centos-bootc/centos-bootc:stream10
 
 ### [IM]MUTABLE /opt

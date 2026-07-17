@@ -47,9 +47,6 @@ jobs:
 
           BASE_REPO="ublue-os/bazzite-deck"
           BASE_TAG="stable"
-          if [[ "${GITHUB_REF}" == "refs/heads/testing" ]]; then
-            BASE_TAG="testing"
-          fi
           IMAGE_REPO="${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_NAME,,}"
           BASE_DIGEST_LABEL="io.github.bazzite-zone.base-image-digest"
 
